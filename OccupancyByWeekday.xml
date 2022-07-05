@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<areaConfiguration>
+    <queryBatch>
+        <query name="occupation_by_weekday">
+            <searchOptions></searchOptions>
+            <statement>
+                SELECT *
+                FROM INFORMATION_SCHEMA.TABLES
+            </statement>
+        </query>
+    </queryBatch>
+    <body format="text/xml"></body>
+</areaConfiguration>
