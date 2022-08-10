@@ -1,0 +1,904 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="Studies">
+      <crf:searchOptions>
+        <crf:parameter name="CoreAreaList" type="nvarchar" displayName="Approvals for studies with the core areas" multiSelect="true" initialSelection="All" columns="2">
+          <crf:query>
+            SELECT
+            ResourceID AS ValueField,
+            ResourceName AS TextField
+            FROM
+            view_Resources VR INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) VUR ON VR.RAreaID=VUR.WAreaID
+            WHERE
+            (ResourceTypeID=33)
+            ORDER BY
+            ResourceName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="Approvals" type="nvarchar" displayName="and the approvals" multiSelect="true" initialSelection="All" columns="2">
+          <crf:query>
+            SELECT
+            ApprovalTypeID AS ValueField,
+            ApprovalName AS TextField
+            FROM
+            view_ApprovalTypes
+            WHERE
+            (ATAreaID=44)
+            ORDER BY
+            ApprovalName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StudyTypeList" type="nvarchar" displayName="and the study type is" multiSelect="true" initialSelection="All">
+          <crf:query>
+            SELECT
+            ResourceID AS ValueField,
+            ResourceName AS TextField
+            FROM
+            view_Resources VR INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) VUR ON VR.RAreaID=VUR.WAreaID
+            WHERE
+            (ResourceTypeID=32)
+            ORDER BY
+            ResourceName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StudySummary" type="nvarchar" maxLength="30" useSearchConditions="true" displayName="where the study identifier or name"/>
+        <crf:parameter name="MonthList" type="nvarchar" displayName="for the following months" multiSelect="true" columns="2">
+          <crf:query>
+            SELECT
+            Number AS ValueField,
+            DATENAME(month,DATEADD(month,Number-1,'01/01/2001')) AS TextField
+            FROM
+            WTCRFNumberList
+            WHERE
+            (Number BETWEEN 1 and 12)
+            ORDER BY
+            Number;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="YearList" type="nvarchar" displayName="for the following years" multiSelect="true" columns="2">
+          <crf:query>
+            DECLARE @Now DATETIME;
+            SET @Now=GETDATE();
+
+            SELECT
+            DATEPART(year,@Now)-Number+1 AS TextField,
+            DATEPART(year,@Now)-Number+1 AS ValueField
+            FROM
+            WTCRFNumberList
+            WHERE
+            (Number&lt;11);
+          </crf:query>
+        </crf:parameter>
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StudySummary NVARCHAR(500);
+        DECLARE @Approvals NVARCHAR(1000);
+        DECLARE @YearList NVARCHAR(500);
+        DECLARE @CoreAreaList NVARCHAR(1000);
+        DECLARE @StudyTypeList NVARCHAR(1000);
+        DECLARE @MonthList NVARCHAR(1000);
+
+        IF (@ItemID IS NOT NULL)
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue NVARCHAR(1000)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary';
+        SELECT @Approvals=FieldValue FROM @ViewParams WHERE FieldName='Approvals';
+        SELECT @YearList=FieldValue FROM @ViewParams WHERE FieldName='YearList';
+        SELECT @CoreAreaList=FieldValue FROM @ViewParams WHERE FieldName='CoreAreaList';
+        SELECT @StudyTypeList=FieldValue FROM @ViewParams WHERE FieldName='StudyTypeList';
+        SELECT @MonthList=FieldValue FROM @ViewParams WHERE FieldName='MonthList';
+        END;
+
+        DECLARE @StudyTypes TABLE
+        (
+        ResourceID UNIQUEIDENTIFIER PRIMARY KEY
+        )
+
+        INSERT INTO @StudyTypes(ResourceID)
+        SELECT
+        ResourceID
+        FROM
+        dbo.get_UniqueIdentifierTable(@StudyTypeList) UIT INNER JOIN view_Resources VR ON UIT.ItemID=VR.ResourceID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) VUR ON VR.RAreaID=VUR.WAreaID;
+
+        DECLARE @Studies TABLE
+        (
+        ACREventID UNIQUEIDENTIFIER PRIMARY KEY
+        )
+
+        DECLARE @CoreAreas TABLE
+        (
+        ResourceID UNIQUEIDENTIFIER PRIMARY KEY
+        )
+
+        DECLARE @Months TABLE
+        (
+        Month INT PRIMARY KEY
+        )
+
+        INSERT INTO @Months(Month)
+        SELECT
+        ItemID
+        FROM dbo.get_IntegerTable(@MonthList);
+
+        INSERT INTO @CoreAreas(ResourceID)
+        SELECT
+        ResourceID
+        FROM
+        dbo.get_UniqueIdentifierTable(@CoreAreaList) UIT INNER JOIN view_Resources VR ON UIT.ItemID=VR.ResourceID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) VUR ON VR.RAreaID=VUR.WAreaID;
+
+
+        DECLARE @Years TABLE
+        (
+        Year INT PRIMARY KEY
+        )
+
+        INSERT INTO @Years(Year)
+        SELECT
+        ItemID
+        FROM
+        dbo.get_IntegerTable(@YearList)
+
+
+        INSERT INTO @Studies(ACREventID)
+        SELECT
+        ACREventID
+        FROM
+        view_StudyAmendments VSA INNER JOIN view_StudyCores VSC ON VSA.SAREventID=VSC.RECEParentID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) VUR ON VSA.REAreaID=VUR.WAreaID
+        INNER JOIN @CoreAreas CA ON VSC.CoreID=CA.ResourceID
+        INNER JOIN @StudyTypes ST ON VSA.SResourceID=ST.ResourceID
+        LEFT OUTER JOIN view_ResourceEventApprovals SUBMITTED ON SUBMITTED.REventID=VSA.SREventID AND SUBMITTED.ATInternalName='CREATOR'
+        WHERE
+        (@StudySummary IS NULL OR SIdentifier LIKE @StudySummary OR SName LIKE @StudySummary)
+        AND (SANumber=0)
+        AND (SAReceivedDate IS NOT NULL)
+        AND DATEPART(year,COALESCE(SUBMITTED.REAApprovedDate,VSA.SAReceivedDate)) IN (SELECT Year FROM @Years)
+        AND DATEPART(month,COALESCE(SUBMITTED.REAApprovedDate,VSA.SAReceivedDate)) IN (SELECT Month FROM @Months);
+
+
+        DECLARE @ApprovalTypes TABLE
+        (
+        ApprovalTypeID INT PRIMARY KEY
+        )
+
+        INSERT INTO @ApprovalTypes(ApprovalTypeID)
+        SELECT
+        ItemID
+        FROM
+        dbo.get_IntegerTable(@Approvals);
+
+
+        SELECT
+        VSA.SAREventID,
+        VSC.CoreID,
+        VSC.CoreName,
+        DATEPART(year,COALESCE(SUBMITTED.REAApprovedDate,VSA.SAReceivedDate)) AS SYear,
+        DATEPART(month,COALESCE(SUBMITTED.REAApprovedDate,VSA.SAReceivedDate)) AS SMonth,
+        DATENAME(month,COALESCE(SUBMITTED.REAApprovedDate,VSA.SAReceivedDate)) AS SMonthName,
+        VSA.SIdentifier AS SIdentifier,
+        VSA.SName,
+        VSA.STitle,
+        VSA.SResourceName,
+        CONVERT(NVARCHAR(11),ACAStartDate,106) AS CoreStartDate,
+        CONVERT(NVARCHAR(11),ACAEndDate,106) AS CoreEndDate,
+        CONVERT(NVARCHAR(11),COALESCE(SUBMITTED.REAApprovedDate,SAReceivedDate),106) AS SAReceivedDate,
+        DATEDIFF(day,COALESCE(SUBMITTED.REAApprovedDate,SAReceivedDate),VSC.ACAStartDate) AS ReceivedDaysFromStart,
+        VSC.CStatusName
+        FROM
+        view_StudyAmendments VSA INNER JOIN view_StudyCores VSC ON VSA.SAREventID=VSC.RECEParentID
+        INNER JOIN @Studies S ON VSC.ACREventID=S.ACREventID
+        LEFT OUTER JOIN view_ResourceEventApprovals SUBMITTED ON SUBMITTED.REventID=VSA.SREventID AND SUBMITTED.ATInternalName='CREATOR'
+        ORDER BY
+        VSC.CoreName,
+        SYear,
+        SMonth,
+        VSA.SIdentifier;
+
+        SET @TotalRecords=@@ROWCOUNT;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="ApprovalTypes">
+      <crf:statement>
+        SELECT
+        VAT.ApprovalTypeID,
+        VAT.ApprovalName
+        FROM
+        view_ApprovalTypes VAT INNER JOIN @ApprovalTypes AT ON VAT.ApprovalTypeID=AT.ApprovalTypeID
+        ORDER BY
+        ApprovalName;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="CoreResources">
+      <crf:statement>
+        SELECT
+        VR.ResourceID,
+        VR.ResourceName
+        FROM
+        view_Resources VR INNER JOIN @CoreAreas CA ON VR.ResourceID=CA.ResourceID
+        WHERE
+        (ResourceTypeID=33)
+        ORDER BY
+        ResourceName;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="StudyResources">
+      <crf:statement>
+        SELECT
+        VR.ResourceID,
+        VR.ResourceName
+        FROM
+        view_Resources VR INNER JOIN @StudyTypes ST ON VR.ResourceID=ST.ResourceID
+        WHERE
+        (ResourceTypeID=32)
+        ORDER BY
+        ResourceName;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Months">
+      <crf:statement>
+        SELECT
+        Month
+        FROM
+        @Months
+        ORDER BY
+        Month;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Years">
+      <crf:statement>
+        SELECT
+        Year
+        FROM
+        @Years
+        ORDER BY
+        Year;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Approvals">
+      <crf:statement>
+        SELECT
+        VSA.SAREventID,
+        VSC.CoreID,
+        VREA.ApprovalTypeID,
+        VREA.ApprovalName,
+        VREA.ATStatusName,
+        CONVERT(NVARCHAR(11),VREA.REARequestedDate,106) AS REARequestedDate,
+        CONVERT(NVARCHAR(11),VREA.REAApprovedDate,106) AS REAApprovedDate,
+        VREA.REAComments,
+        DATEPART(year,COALESCE(SUBMITTED.REAApprovedDate,VSA.SAReceivedDate)) AS SYear,
+        DATEPART(month,COALESCE(SUBMITTED.REAApprovedDate,VSA.SAReceivedDate)) AS SMonth,
+        DATEDIFF(day,COALESCE(SUBMITTED.REAApprovedDate,VREA.REARequestedDate), VREA.REAApprovedDate) ApprovedDaysFromRequested,
+        DATEDIFF(day,VREA.REAApprovedDate,VSC.ACAStartDate) ApprovedDaysFromStart
+        FROM
+        view_ResourceEventApprovals VREA INNER JOIN @ApprovalTypes AT ON VREA.ApprovalTypeID=AT.ApprovalTypeID
+        INNER JOIN view_StudyAmendments VSA ON VREA.REventID=VSA.SAREventID
+        INNER JOIN view_StudyCores VSC ON VSA.SAREventID=VSC.RECEParentID
+        INNER JOIN @Studies S ON VSC.ACREventID=S.ACREventID
+        LEFT OUTER JOIN view_ResourceEventApprovals SUBMITTED ON SUBMITTED.REventID=VSA.SREventID AND SUBMITTED.ATInternalName='CREATOR'
+        ORDER BY
+        VREA.ApprovalName;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format by year, month and study for each core area" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:variable name="TotalApprovalTypes" select="count(/NewDataSet/ApprovalTypes)"/>
+
+      <!-- How savage! -->
+      <xsl:template name="insertLineBreaks">
+        <xsl:param name="textValue" />
+        <xsl:choose>
+          <xsl:when test="contains($textValue, '&#xA;')">
+            <xsl:value-of select="substring-before($textValue,'&#xA;')" />
+            <br />
+            <xsl:call-template name="insertLineBreaks">
+              <xsl:with-param name="textValue" select="substring-after($textValue,'&#xA;')" />
+            </xsl:call-template>
+          </xsl:when>
+          <xsl:otherwise>
+            <xsl:value-of select="$textValue" />
+          </xsl:otherwise>
+        </xsl:choose>
+      </xsl:template>
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Core Approvals by Approval Requested Date</h1>
+          <xsl:choose>
+            <xsl:when test="not(Months)">
+              <div>
+                No months have been selected.
+              </div>
+            </xsl:when>
+            <xsl:when test="not(Years)">
+              <div>
+                No years have been selected.
+              </div>
+            </xsl:when>
+            <xsl:when test="not(CoreResources)">
+              <div>
+                No core areas have been selected.
+              </div>
+            </xsl:when>
+            <xsl:when test="not(StudyResources)">
+              <div>
+                No study types have been selected.
+              </div>
+            </xsl:when>
+            <xsl:when test="CoreResources">
+              <table class="grid" cellpadding="3" cellspacing="0" style="border-style : none">
+                <xsl:apply-templates select="CoreResources" />
+              </table>
+            </xsl:when>
+          </xsl:choose>
+        </div>
+      </xsl:template>
+
+
+
+      <!-- Approvals Header-->
+      <xsl:template match="ApprovalTypes">
+        <td colspan="5" class="text_center color_block_2">
+          <xsl:value-of select="ApprovalName"/>
+        </td>
+      </xsl:template>
+
+
+
+      <!-- Study Cores-->
+      <xsl:template match="CoreResources">
+        <tr>
+          <td colspan="{$TotalApprovalTypes+11}" style="border-style : none;font-size : 2.5em">
+            <xsl:value-of select="ResourceName" />
+          </td>
+        </tr>
+
+        <xsl:choose>
+          <xsl:when test="/NewDataSet/Studies[(./CoreID=current()/ResourceID)]">
+            <xsl:apply-templates select="/NewDataSet/Studies[(./CoreID=current()/ResourceID)]" />
+          </xsl:when>
+          <xsl:otherwise>
+            <tr>
+              <td class="text_large" colspan="{$TotalApprovalTypes+11}" style="border-style : none;">
+                There have been no studies for <xsl:value-of select="ResourceName" /> in the following years:
+                <ul>
+                  <xsl:apply-templates select="/NewDataSet/Years"/>
+                </ul>
+              </td>
+            </tr>
+          </xsl:otherwise>
+        </xsl:choose>
+      </xsl:template>
+
+
+      <!-- List of search years -->
+      <xsl:template match="Years">
+        <li>
+          <xsl:value-of select="Year"/>
+        </li>
+      </xsl:template>
+
+
+
+      <!-- Study details -->
+      <xsl:template match="Studies">
+        <xsl:variable name="Study" select="."/>
+
+        <xsl:if test="preceding-sibling::Studies[1]/SYear!=current()/SYear or position()=1">
+          <tr>
+            <td colspan="{$TotalApprovalTypes+11}" style="border-style : none;font-size : 2em">
+              <xsl:value-of select="concat(SYear,' - ',CoreName)" />
+            </td>
+          </tr>
+          <tr>
+            <td colspan="9" style="border-style: none;">
+              <br/>
+            </td>
+            <xsl:apply-templates select="/NewDataSet/ApprovalTypes"/>
+          </tr>
+          <tr class="color_block_1">
+            <td>
+              Identifier
+            </td>
+            <td>
+              Study
+            </td>
+            <td>
+              Study Type
+            </td>
+            <td>
+              Study Title
+            </td>
+            <td class="text_center cell_nowrap">
+              Date Received
+            </td>
+            <td class="text_center cell_nowrap">
+              Core Start Date
+            </td>
+            <td class="text_center cell_nowrap">
+              Core End Date
+            </td>
+            <td>
+              Core Status
+            </td>
+            <td class="text_center">
+              No. Days From Received to Core Start
+            </td>
+            <xsl:for-each select="/NewDataSet/ApprovalTypes">
+              <td class="text_center">
+                Status 
+              </td>
+              <td class="text_center cell_nowrap">
+                Approval Requested Date
+              </td>
+              <td class="text_center cell_nowrap">
+                Approval Date
+              </td>
+              <td class="text_center">
+                No. Days Since Approval Requested
+              </td>
+              <td class="text_center">
+                No. Days From Core Start
+              </td> 
+            </xsl:for-each>
+          </tr>
+        </xsl:if>
+        <xsl:if test="preceding-sibling::Studies[1]/SMonth!=current()/SMonth or position()=1">
+          <tr class="color_block_3 text_large">
+            <td colspan="{5*$TotalApprovalTypes+11}">
+              <xsl:value-of select="SMonthName" />
+            </td>
+          </tr>
+        </xsl:if>
+        <tr>
+          <td>
+            <xsl:value-of select="SIdentifier" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="SName"/>
+            <br/>
+          </td>
+          <td class="cell_nowrap">
+            <xsl:value-of select="SResourceName"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:call-template name="insertLineBreaks">
+              <xsl:with-param name="textValue" select="STitle" />
+            </xsl:call-template>
+            <br/>
+          </td>
+          <td class="text_center cell_nowrap">
+            <xsl:value-of select="SAReceivedDate"/>
+            <br/>
+          </td>
+          <td class="text_center cell_nowrap">
+            <xsl:value-of select="CoreStartDate"/>
+            <br/>
+          </td>
+          <td class="text_center cell_nowrap">
+            <xsl:value-of select="CoreEndDate"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="CStatusName"/>
+            <br/>
+          </td>
+          <td class="text_center cell_nowrap">
+            <xsl:if test="ReceivedDaysFromStart&lt;0">
+              <xsl:attribute name="style">
+                background:#cc0000;color:#ffffff;
+              </xsl:attribute>
+            </xsl:if>
+            <xsl:value-of select="ReceivedDaysFromStart"/>
+            <br/>
+          </td>
+          <xsl:for-each select="/NewDataSet/ApprovalTypes">
+            <xsl:choose>
+              <xsl:when test="/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./SAREventID=$Study/SAREventID) and (./ApprovalTypeID=current()/ApprovalTypeID)]">
+                <xsl:apply-templates select="/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./SAREventID=$Study/SAREventID) and (./ApprovalTypeID=current()/ApprovalTypeID)]"/>
+              </xsl:when>
+              <xsl:otherwise>
+                <td colspan="5" class="color_block_2">
+                  <br/>
+                </td>
+              </xsl:otherwise>
+            </xsl:choose>
+
+          </xsl:for-each>
+        </tr>
+        <xsl:if test="(following-sibling::Studies[1]/SMonth!=current()/SMonth) or (following-sibling::Studies[1]/SYear!=current()/SYear) or (position()=last())">
+          <tr class="text_large">
+            <td colspan="5" style="border-style:none">
+              <br/>
+            </td>
+            <td colspan="3" class="text_right color_block_3">
+              Averages for <xsl:value-of select="concat($Study/SMonthName,' ',$Study/SYear)"/>
+            </td>
+            <td class="text_center color_block_3">
+              <xsl:variable name="ReceivedDaysFromStartCount" select="count(/NewDataSet/Studies[(./CoreID=$Study/CoreID)  and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ReceivedDaysFromStart&gt;=0)])"/>
+
+              <xsl:choose>
+                <xsl:when test="$ReceivedDaysFromStartCount=0">
+                  --
+                </xsl:when>
+                <xsl:otherwise>
+                  <xsl:value-of select="format-number(sum(/NewDataSet/Studies[(./CoreID=$Study/CoreID)  and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ReceivedDaysFromStart&gt;=0)]/ReceivedDaysFromStart) div $ReceivedDaysFromStartCount,'0.0')"/>
+                </xsl:otherwise>
+              </xsl:choose>
+            </td>
+            <xsl:for-each select="/NewDataSet/ApprovalTypes">
+              <td colspan="3" class="text_right color_block_3">
+                <xsl:value-of select="ApprovalName"/>
+              </td>
+              <td class="text_center color_block_3">
+                <xsl:variable name="ApprovedDaysFromRequestedCount" select="count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ApprovedDaysFromRequested&gt;=0)])"/>
+
+
+                <xsl:choose>
+                  <xsl:when test="$ApprovedDaysFromRequestedCount=0">
+                    --
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:value-of select="format-number(sum(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ApprovedDaysFromRequested&gt;=0)]/ApprovedDaysFromRequested) div $ApprovedDaysFromRequestedCount,'0.0')"/>
+                  </xsl:otherwise>
+                </xsl:choose>
+              </td>
+              <td class="text_center color_block_3">
+                <xsl:variable name="ApprovedDaysFromStartCount" select="count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)])"/>
+
+                <xsl:choose>
+                  <xsl:when test="$ApprovedDaysFromStartCount=0">
+                    --
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:value-of select="format-number(sum(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)]/ApprovedDaysFromStart) div $ApprovedDaysFromStartCount,'0.0')"/>
+                  </xsl:otherwise>
+                </xsl:choose>
+              </td>
+            </xsl:for-each>
+          </tr>
+        </xsl:if>
+        <xsl:if test="following-sibling::Studies[1]/SYear!=current()/SYear or position()=last()">
+          <tr class="text_large">
+            <td colspan="5" style="border-style:none">
+              <br/>
+            </td>
+            <td colspan="3" class="text_right color_block_3 cell_nowrap">
+              Overall Averages for <xsl:value-of select="$Study/SYear"/>
+            </td>
+            <td class="text_center color_block_3">
+              <xsl:variable name="ReceivedDaysFromStartCount" select="count(/NewDataSet/Studies[(./CoreID=$Study/CoreID) and (./SYear=$Study/SYear) and (./ReceivedDaysFromStart&gt;=0)])"/>
+
+              <xsl:choose>
+                <xsl:when test="$ReceivedDaysFromStartCount=0">
+                  --
+                </xsl:when>
+                <xsl:otherwise>
+                  <xsl:value-of select="format-number(sum(/NewDataSet/Studies[(./CoreID=$Study/CoreID) and (./SYear=$Study/SYear) and (./ReceivedDaysFromStart&gt;=0)]/ReceivedDaysFromStart) div $ReceivedDaysFromStartCount,'0.0')"/>
+                </xsl:otherwise>
+              </xsl:choose>
+            </td>
+            <xsl:for-each select="/NewDataSet/ApprovalTypes">
+              <td colspan="3" class="text_right color_block_3 cell_nowrap">
+                <xsl:value-of select="ApprovalName"/>
+              </td>
+              <td class="text_center color_block_3">
+                <xsl:variable name="ApprovedDaysFromRequestedCount" select="count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromRequested&gt;=0)])"/>
+
+                <xsl:choose>
+                  <xsl:when test="$ApprovedDaysFromRequestedCount=0">
+                    --
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:value-of select="format-number(sum(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromRequested&gt;=0)]/ApprovedDaysFromRequested) div $ApprovedDaysFromRequestedCount,'0.0')"/>
+                  </xsl:otherwise>
+                </xsl:choose>
+              </td>
+              <td class="text_center color_block_3">
+                <xsl:variable name="ApprovedDaysFromStartCount" select="count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)])"/>
+
+                <xsl:choose>
+                  <xsl:when test="$ApprovedDaysFromStartCount=0">
+                    --
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:value-of select="format-number(sum(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)]/ApprovedDaysFromStart) div count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)]),'0.0')"/>
+                  </xsl:otherwise>
+                </xsl:choose>
+              </td>
+            </xsl:for-each>
+          </tr>
+        </xsl:if>
+      </xsl:template>
+
+
+      <!-- Approval details -->
+      <xsl:template match="Approvals">
+        <td class="text_center">
+          <xsl:value-of select="ATStatusName"/>
+          <br/>
+        </td>
+        <td class="text_center cell_nowrap">
+          <xsl:value-of select="REARequestedDate"/>
+          <br/>
+        </td>
+        <td class="text_center cell_nowrap">
+          <xsl:value-of select="REAApprovedDate"/>
+          <br/>
+        </td>
+        <td class="text_center cell_nowrap">
+          <xsl:if test="ApprovedDaysFromRequested&lt;0">
+            <xsl:attribute name="style">
+              background:#cc0000;color:#ffffff;
+            </xsl:attribute>
+          </xsl:if>
+          <xsl:value-of select="ApprovedDaysFromRequested"/>
+          <br/>
+        </td>
+        <td class="text_center cell_nowrap">
+          <xsl:if test="ApprovedDaysFromStart&lt;0">
+            <xsl:attribute name="style">
+              background:#cc0000;color:#ffffff;
+            </xsl:attribute>
+          </xsl:if>
+          <xsl:value-of select="ApprovedDaysFromStart"/>
+          <br/>
+        </td>
+      </xsl:template>
+
+    </xsl:stylesheet>
+  </crf:body>
+
+  <crf:body id="2" title="Print format summary of monthly averages for core areas" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:variable name="TotalApprovalTypes" select="count(/NewDataSet/ApprovalTypes)"/>
+
+      <!-- How savage! -->
+      <xsl:template name="insertLineBreaks">
+        <xsl:param name="textValue" />
+        <xsl:choose>
+          <xsl:when test="contains($textValue, '&#xA;')">
+            <xsl:value-of select="substring-before($textValue,'&#xA;')" />
+            <br />
+            <xsl:call-template name="insertLineBreaks">
+              <xsl:with-param name="textValue" select="substring-after($textValue,'&#xA;')" />
+            </xsl:call-template>
+          </xsl:when>
+          <xsl:otherwise>
+            <xsl:value-of select="$textValue" />
+          </xsl:otherwise>
+        </xsl:choose>
+      </xsl:template>
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Core Approvals</h1>
+          <xsl:choose>
+            <xsl:when test="not(Years)">
+              <div>
+                No years have been selected.
+              </div>
+            </xsl:when>
+            <xsl:when test="not(CoreResources)">
+              <div>
+                No core areas have been selected.
+              </div>
+            </xsl:when>
+            <xsl:when test="not(StudyResources)">
+              <div>
+                No study types have been selected.
+              </div>
+            </xsl:when>
+            <xsl:when test="CoreResources">
+              <table class="grid" cellpadding="3" cellspacing="0" style="border-style : none">
+                <xsl:apply-templates select="CoreResources" />
+              </table>
+            </xsl:when>
+          </xsl:choose>
+        </div>
+      </xsl:template>
+
+
+
+      <!-- Approvals Header-->
+      <xsl:template match="ApprovalTypes">
+        <td colspan="2" class="text_center color_block_2">
+          <xsl:value-of select="ApprovalName"/>
+        </td>
+      </xsl:template>
+
+
+
+      <!-- Study Cores-->
+      <xsl:template match="CoreResources">
+        <xsl:if test="position()&gt;1">
+          <tr>
+            <td style="border-style : none;">
+              <br/>
+              <br/>
+            </td>
+          </tr>
+        </xsl:if>
+        <tr>
+          <td colspan="{$TotalApprovalTypes+4}" style="border-style : none;font-size : 2.5em">
+            <xsl:value-of select="ResourceName" />
+          </td>
+        </tr>
+        <xsl:choose>
+          <xsl:when test="/NewDataSet/Studies[(./CoreID=current()/ResourceID)]">
+            <tr>
+              <td colspan="3" style="border-style:none;">
+                <br/>
+              </td>
+              <xsl:apply-templates select="/NewDataSet/ApprovalTypes"/>
+            </tr>
+            <tr class="color_block_1">
+              <td class="text_center">
+                Year
+              </td>
+              <td class="text_center">
+                Month
+              </td>
+              <td class="text_center">
+                Average No. Days From Received to Core Start
+              </td>
+              <xsl:for-each select="/NewDataSet/ApprovalTypes">
+                <td class="text_center">
+                  Average No. Days Since Requested
+                </td>
+                <td class="text_center">
+                  Average No. Days From Core Start
+                </td>
+              </xsl:for-each>
+            </tr>
+            <xsl:apply-templates select="/NewDataSet/Studies[(./CoreID=current()/ResourceID)]" />
+          </xsl:when>
+          <xsl:otherwise>
+            <tr>
+              <td class="text_large" colspan="{$TotalApprovalTypes+4}" style="border-style : none;">
+                There have been no studies for <xsl:value-of select="ResourceName" /> in the following years:
+                <ul>
+                  <xsl:apply-templates select="/NewDataSet/Years"/>
+                </ul>
+              </td>
+            </tr>
+          </xsl:otherwise>
+        </xsl:choose>
+      </xsl:template>
+
+
+      <!-- List of search years -->
+      <xsl:template match="Years">
+        <li>
+          <xsl:value-of select="Year"/>
+        </li>
+      </xsl:template>
+
+
+
+
+
+      <!-- Study details -->
+      <xsl:template match="Studies">
+        <xsl:variable name="Study" select="."/>
+
+        <xsl:if test="(preceding-sibling::Studies[1]/SYear!=current()/SYear) or (preceding-sibling::Studies[1]/SMonth!=current()/SMonth) or position()=1">
+          <tr>
+            <td class="text_center">
+              <xsl:value-of select="SYear" />
+            </td>
+            <td class="text_center">
+              <xsl:value-of select="SMonthName" />
+            </td>
+            <td class="text_center">
+              <xsl:variable name="ReceivedDaysFromStartCount" select="count(/NewDataSet/Studies[(./CoreID=$Study/CoreID)  and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ReceivedDaysFromStart&gt;=0)])"/>
+
+              <xsl:choose>
+                <xsl:when test="$ReceivedDaysFromStartCount=0">
+                  --
+                </xsl:when>
+                <xsl:otherwise>
+                  <xsl:value-of select="format-number(sum(/NewDataSet/Studies[(./CoreID=$Study/CoreID)  and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ReceivedDaysFromStart&gt;=0)]/ReceivedDaysFromStart) div $ReceivedDaysFromStartCount,'0.0')"/>
+                </xsl:otherwise>
+              </xsl:choose>
+            </td>
+            <xsl:for-each select="/NewDataSet/ApprovalTypes">
+              <td class="text_center">
+                <xsl:variable name="ApprovedDaysFromRequestedCount" select="count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ApprovedDaysFromRequested&gt;=0)])"/>
+                <xsl:choose>
+                  <xsl:when test="$ApprovedDaysFromRequestedCount=0">
+                    --
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:value-of select="format-number(sum(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ApprovedDaysFromRequested&gt;=0)]/ApprovedDaysFromRequested) div $ApprovedDaysFromRequestedCount,'0.0')"/>
+                  </xsl:otherwise>
+                </xsl:choose>
+              </td>
+              <td class="text_center">
+                <xsl:variable name="ApprovedDaysFromStartCount" select="count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)])"/>
+                <xsl:choose>
+                  <xsl:when test="$ApprovedDaysFromStartCount=0">
+                    --
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:value-of select="format-number(sum(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SMonth=$Study/SMonth) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)]/ApprovedDaysFromStart) div $ApprovedDaysFromStartCount,'0.0')"/>
+                  </xsl:otherwise>
+                </xsl:choose>
+              </td>
+            </xsl:for-each>
+          </tr>
+        </xsl:if>
+        <xsl:if test="following-sibling::Studies[1]/SYear!=current()/SYear or position()=last()">
+          <tr class="text_large">
+            <td colspan="2" class="text_right color_block_3 cell_nowrap">
+              <xsl:value-of select="ApprovalName"/> Overall Averages for <xsl:value-of select="$Study/SYear"/>
+            </td>
+            <td class="text_center color_block_3">
+              <xsl:variable name="ReceivedDaysFromStartCount" select="count(/NewDataSet/Studies[(./CoreID=$Study/CoreID) and (./SYear=$Study/SYear) and (./ReceivedDaysFromStart&gt;=0)])"/>
+
+              <xsl:choose>
+                <xsl:when test="$ReceivedDaysFromStartCount=0">
+                  --
+                </xsl:when>
+                <xsl:otherwise>
+                  <xsl:value-of select="format-number(sum(/NewDataSet/Studies[(./CoreID=$Study/CoreID) and (./SYear=$Study/SYear) and (./ReceivedDaysFromStart&gt;=0)]/ReceivedDaysFromStart) div $ReceivedDaysFromStartCount,'0.0')"/>
+                </xsl:otherwise>
+              </xsl:choose>
+            </td>
+            <xsl:for-each select="/NewDataSet/ApprovalTypes">
+              <td class="text_center color_block_3">
+                <xsl:variable name="ApprovedDaysFromRequestedCount" select="count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromRequested&gt;=0)])"/>
+
+                <xsl:choose>
+                  <xsl:when test="$ApprovedDaysFromRequestedCount=0">
+                    --
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:value-of select="format-number(sum(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromRequested&gt;=0)]/ApprovedDaysFromRequested) div $ApprovedDaysFromRequestedCount,'0.0')"/>
+                  </xsl:otherwise>
+                </xsl:choose>
+              </td>
+              <td class="text_center color_block_3">
+                <xsl:variable name="ApprovedDaysFromStartCount" select="count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)])"/>
+
+                <xsl:choose>
+                  <xsl:when test="$ApprovedDaysFromStartCount=0">
+                    --
+                  </xsl:when>
+                  <xsl:otherwise>
+                    <xsl:value-of select="format-number(sum(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)]/ApprovedDaysFromStart) div count(/NewDataSet/Approvals[(./CoreID=$Study/CoreID) and (./ApprovalTypeID=current()/ApprovalTypeID) and (./SYear=$Study/SYear) and (./ApprovedDaysFromStart&gt;=0)]),'0.0')"/>
+                  </xsl:otherwise>
+                </xsl:choose>
+              </td>
+            </xsl:for-each>
+          </tr>
+        </xsl:if>
+
+      </xsl:template>
+
+
+    </xsl:stylesheet>
+  </crf:body>
+
+
+</crf:areaConfiguration>

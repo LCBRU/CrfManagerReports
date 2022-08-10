@@ -1,0 +1,403 @@
+﻿<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml"
+                       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                       xsi:schemaLocation="http://www.crfmanager.com/system/xml http://www.crfmanager.com/system/xml/schemas/AreaConfiguration.xsd">
+  <crf:queryBatch>
+    <crf:query name="Assets">
+      <crf:searchOptions>
+        <crf:parameter name="LocationList" type="nvarchar" displayName="The asset location is" multiSelect="true" columns="3">
+          <crf:query>
+            SELECT
+            DISTINCT
+            ContactID AS ValueField,
+            DisplayName AS TextField
+            FROM
+            view_Contacts VC INNER JOIN view_Assets VA ON VC.ContactID=VA.ASTLocationID
+            INNER JOIN view_UserRights VUR ON VA.ASTAreaID=VUR.WAreaID
+            WHERE
+            (WContactTypeID IN (200,201))
+            AND (VUR.WUserID=@UserID)
+            AND (VUR.WRView=1)
+            ORDER BY
+            DisplayName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="AreaList" type="nvarchar" displayName="and the asset belongs to the area" multiSelect="true" columns="2">
+          <crf:query>
+            SELECT
+            WAreaID AS ValueField,
+            WAName AS TextField
+            FROM
+            WTCRFAreas
+            WHERE
+            WAreaID IN (SELECT DISTINCT RAreaID FROM WTCRFResources WHERE RResourceType=33)
+            AND WAreaID IN (SELECT VUR.WAreaID FROM view_UserRights VUR WHERE VUR.WUserID=@UserID)
+            ORDER BY
+            WAName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="ActionList" type="nvarchar" displayName="and the action is" multiSelect="true" columns="2">
+          <crf:query>
+            SELECT
+            ASTATypeID AS ValueField,
+            ASTAName AS TextField
+            FROM
+            view_AssetActionTypes
+            ORDER BY
+            ASTAName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="ActionCompletionDate" type="datetime" displayName="and the action was completed on or after" />
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+        DECLARE @LocationList NVARCHAR(1000);
+        DECLARE @ActionList NVARCHAR(1000);
+        DECLARE @AreaList NVARCHAR(1000);
+        DECLARE @ActionCompletionDate DATETIME;
+
+        IF ( @ItemID IS NOT NULL )
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName NVARCHAR(40),
+        FieldValue NVARCHAR(1000)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @LocationList=FieldValue FROM @ViewParams WHERE FieldName='LocationList';
+        SELECT @ActionList=FieldValue FROM @ViewParams WHERE FieldName='ActionList';
+        SELECT @AreaList=FieldValue FROM @ViewParams WHERE FieldName='AreaList';
+        SELECT @ActionCompletionDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='ActionCompletionDate';
+        END
+
+        DECLARE @Locations TABLE
+        (
+        LocationID INT PRIMARY KEY
+        )
+
+        INSERT INTO @Locations(LocationID)
+        SELECT ItemID FROM dbo.get_IntegerTable(@LocationList);
+
+
+        DECLARE @Actions TABLE
+        (
+        ActionID INT PRIMARY KEY
+        )
+
+        INSERT INTO @Actions(ActionID)
+        SELECT ItemID FROM dbo.get_IntegerTable(@ActionList);
+
+
+        DECLARE @Areas TABLE
+        (
+        AreaID INT PRIMARY KEY
+        )
+
+        INSERT INTO @Areas(AreaID)
+        SELECT ItemID FROM dbo.get_IntegerTable(@AreaList);
+
+
+        DECLARE @Assets TABLE
+        (
+        AssetID INT,
+        ActionID INT
+        )
+
+        INSERT INTO @Assets(AssetID,ActionID)
+        SELECT
+        DISTINCT
+        VA.AssetID,
+        A.ActionID
+        FROM
+        view_Assets VA INNER JOIN view_AssetActions VAA ON VA.AssetID=VAA.AssetID
+        INNER JOIN @Actions A ON VAA.AATypeID=A.ActionID
+        INNER JOIN @Locations L ON VA.ASTLocationID=L.LocationID
+        INNER JOIN @Areas AR ON VA.ASTAreaID=AR.AreaID
+        LEFT OUTER JOIN WTCRFAssetActionTypes AAT ON VA.AssetID=AAT.ATPAssetID AND AAT.ATPTypeID=VAA.AATypeID
+        WHERE
+        ((VAA.ASTASubTypeID IN (0,5,6,7))
+        OR (AAT.ATPTypeID IS NOT NULL))
+        AND ((VAA.ASTASubTypeID=5) OR (VA.ASTSSubTypeID&lt;&gt;5))
+        AND (@ActionCompletionDate IS NULL OR VAA.AACDate&gt;=@ActionCompletionDate);
+
+        SELECT
+        VA.AssetID,
+        VA.ASTModel,
+        VA.ASTResourceName,
+        VA.ASTSerialNo,
+        VA.ASTLocationName,
+        VA.ASTAreaName,
+        VAAT.ASTAName,
+        VAAT.ASTATypeID
+        FROM
+        view_Assets VA INNER JOIN @Assets A ON VA.AssetID=A.AssetID
+        INNER JOIN view_AssetActionTypes VAAT ON A.ActionID=VAAT.ASTATypeID
+        ORDER BY
+        VA.ASTResourceName,
+        VA.ASTModel;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="ActionTypes">
+      <crf:statement>
+        SELECT
+        VAAT.ASTATypeID,
+        VAAT.ASTAName
+        FROM
+        view_AssetActionTypes VAAT INNER JOIN @Actions A ON VAAT.ASTATypeID=A.ActionID
+        ORDER BY
+        VAAT.ASTAName;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="LastCompletionDate">
+      <crf:statement>
+        SELECT
+        VAA.AATypeID,
+        VAA.AssetID,
+        CONVERT(NVARCHAR(11),MAX(VAA.AACDate),106) AS AACDate
+        FROM
+        view_AssetActions VAA INNER JOIN @Actions A ON VAA.AATypeID=A.ActionID
+        INNER JOIN (SELECT DISTINCT AssetID FROM @Assets) AA ON VAA.AssetID=AA.AssetID
+        WHERE
+        (@ActionCompletionDate IS NULL OR VAA.AACDate&gt;=@ActionCompletionDate)
+        GROUP BY
+        VAA.AATypeID,
+        VAA.AssetID;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="NextDueDate">
+      <crf:statement>
+        SELECT
+        VAA.AATypeID,
+        VAA.AssetID,
+        CONVERT(NVARCHAR(11),MIN(VAA.AADDate),106) AS AADDate
+        FROM
+        view_AssetActions VAA INNER JOIN @Actions A ON VAA.AATypeID=A.ActionID
+        INNER JOIN (SELECT DISTINCT AssetID FROM @Assets) AA ON VAA.AssetID=AA.AssetID
+        WHERE
+        (VAA.AADDate&gt;=GETDATE())
+        GROUP BY
+        VAA.AATypeID,
+        VAA.AssetID;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Show" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:variable name="AreaID" select="200"/>
+      <xsl:variable name="ActionAreaID" select="201"/>
+      <xsl:template match="NewDataSet">
+        <div>
+          <xsl:apply-templates select="ActionTypes" />
+        </div>
+      </xsl:template>
+
+      <!-- Action type sections -->
+      <xsl:template match="ActionTypes">
+        <h1>
+          <xsl:value-of select="ASTAName" />
+        </h1>
+        <table cellpadding="3" cellspacing="0" class="grid">
+          <xsl:call-template name="Header"/>
+          <xsl:apply-templates select="/NewDataSet/Assets[(./ASTATypeID=current()/ASTATypeID)]" />
+        </table>
+      </xsl:template>
+
+
+      <!-- Table columns-->
+      <xsl:template name="Header">
+        <thead>
+          <tr>
+            <td>
+              <crf:areaScript areaID="{$AreaID}" name="AssetID" actionType="None" operation="View" />
+            </td>
+            <td>
+              <crf:areaScript areaID="{$AreaID}" name="ASTResourceID" actionType="None" operation="View" />
+            </td>
+            <td>
+              <crf:areaScript areaID="{$AreaID}" name="ASTModel" actionType="None" operation="View" />
+            </td>
+            <td>
+              <crf:areaScript areaID="{$AreaID}" name="ASTSerialNo" actionType="None" operation="View" />
+            </td>
+            <td>
+              <crf:areaScript areaID="{$AreaID}" name="ASTAreaID" actionType="None" operation="View" />
+            </td>
+            <td>
+              <crf:areaScript areaID="{$AreaID}" name="ASTLocationID" actionType="None" operation="View" />
+            </td>
+            <td>
+              <crf:areaScript areaID="{$ActionAreaID}" name="AATypeID" actionType="None" operation="View" />
+            </td>
+            <td>
+              Last <crf:areaScript areaID="{$ActionAreaID}" name="AACDate" actionType="None" operation="View" />
+            </td>
+            <td>
+              Next <crf:areaScript areaID="{$ActionAreaID}" name="AADDate" actionType="None" operation="View" />
+            </td>
+          </tr>
+        </thead>
+      </xsl:template>
+
+      <!-- Assets applicable to specific action type -->
+      <xsl:template match="Assets">
+        <tr>
+          <td>
+            <xsl:value-of select="AssetID" />
+          </td>
+          <td>
+            <xsl:value-of select="ASTResourceName" />
+          </td>
+          <td>
+            <xsl:value-of select="ASTModel" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="ASTSerialNo" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="ASTAreaName" />
+          </td>
+          <td>
+            <xsl:value-of select="ASTLocationName" />
+          </td>
+          <td>
+            <xsl:value-of select="ASTAName" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="/NewDataSet/LastCompletionDate[(./AssetID=current()/AssetID) and (./AATypeID=current()/ASTATypeID)]/AACDate" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="/NewDataSet/NextDueDate[(./AssetID=current()/AssetID) and (./AATypeID=current()/ASTATypeID)]/AADDate" />
+            <br/>
+          </td>
+        </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+
+  <crf:export id="2" title="Open in Excel" format="text/xml" outputFormat="application/vnd.ms-excel">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="no" omit-xml-declaration="no" />
+      <xsl:variable name="AreaID" select="200"/>
+      <xsl:variable name="ActionAreaID" select="201"/>
+      <xsl:template match="NewDataSet">
+        <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" xmlns:html="http://www.w3.org/TR/REC-html40">
+          <Worksheet ss:Name="Assets">
+            <Table>
+              <Column ss:AutoFitWidth="1" />
+              <Row>
+                <Cell>
+                  <Data ss:Type="String">
+                    Asset ID
+                  </Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">
+                    Type
+                  </Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">
+                    Model
+                  </Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">
+                    Serial No.
+                  </Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">
+                    Area
+                  </Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">
+                    Location
+                  </Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">
+                    Action
+                  </Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">
+                    Last Completion Date
+                  </Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">
+                    Next Due Date
+                  </Data>
+                </Cell>
+
+              </Row>
+              <xsl:for-each select="Assets">
+                <Row>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="AssetID"/>
+                    </Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="ASTResourceName"/>
+                    </Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="ASTModel"/>
+                    </Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="ASTSerialNo"/>
+                    </Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="ASTAreaName"/>
+                    </Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="ASTLocationName"/>
+                    </Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="ASTAName"/>
+                    </Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="/NewDataSet/LastCompletionDate[(./AssetID=current()/AssetID) and (./AATypeID=current()/ASTATypeID)]/AACDate" />
+                    </Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="String">
+                      <xsl:value-of select="/NewDataSet/NextDueDate[(./AssetID=current()/AssetID) and (./AATypeID=current()/ASTATypeID)]/AADDate" />
+                    </Data>
+                  </Cell>
+                </Row>
+              </xsl:for-each>
+            </Table>
+          </Worksheet>
+        </Workbook>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:export>
+</crf:areaConfiguration>

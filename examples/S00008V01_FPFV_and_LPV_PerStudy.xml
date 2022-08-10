@@ -1,0 +1,271 @@
+﻿<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>S00008V01</crf:version>
+    <crf:analysis>Project Metrics</crf:analysis>
+    <crf:analysis>Patient Visits</crf:analysis>
+    <crf:analysis></crf:analysis>
+
+    <crf:summary>Reports the first patient/first visit and last patient/last visit per study and first recruited date</crf:summary>
+    <crf:notes>
+      Only patient visits with a complete status are reported.
+      For the 'first recruitment date' to be populated patients must have a current status of recruited and a recruitment date.
+      Any patients with a 'recruited' status and incomplete recruitment visit (no recruitment date) will return a null value for this column.
+    </crf:notes>
+
+    <crf:InternalNotes>
+      Possibly need further follow up on how the recruited date is picked up whether it should only include patients with a completed recruitment date.
+    </crf:InternalNotes>
+  </crf:comment>
+  <crf:queryBatch>
+    <crf:query name="Visits">
+      <crf:searchOptions>
+        <crf:parameter name="StudySummary" type="nvarchar" maxLength="50" useSearchConditions="true" displayName="Where the study identifier or name" />
+        <crf:parameter name="Status" type="nvarchar" displayName="and include the following booking statuses" multiSelect="true" columns="3" initialSelection="All">
+          <crf:query>
+            SELECT
+            REStatusTypeID AS ValueField,
+            RESTName AS TextField
+            FROM
+            view_ResourceEventStatusTypes VREST INNER JOIN
+            (SELECT DISTINCT REStatusID FROM view_ResourceEvents WHERE (ResourceTypeID IN (1010,1018)) AND (REAreaID=301)) VRE ON VREST.REStatusTypeID=VRE.REStatusID
+            ORDER BY
+            RESTName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="Site" type="nvarchar" displayName="and where the site is" defaultText="All sites">
+          <crf:query>
+            SELECT
+            ResourceID AS ValueField,
+            ResourceName AS TextField
+            FROM
+            view_Resources
+            WHERE
+            ResourceTypeID=1016
+            ORDER BY
+            ResourceName
+          </crf:query>
+        </crf:parameter>
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+        DECLARE @StudySummary NVARCHAR(500);
+        DECLARE @Status NVARCHAR(MAX);
+        DECLARE @Site NVARCHAR(500);
+
+        DECLARE @Statuses TABLE
+        (
+        Status INTEGER PRIMARY KEY
+        )
+
+
+        IF (@ItemID IS NOT NULL)
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue NVARCHAR(1000)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary';
+        SELECT @Status=FieldValue FROM @ViewParams WHERE FieldName='Status';
+        SELECT @Site=FieldValue FROM @ViewParams WHERE FieldName='Site';
+
+        END;
+
+        INSERT INTO @Statuses(Status)
+        SELECT
+        ItemID
+        FROM
+        dbo.get_IntegerTable(@Status);
+
+        SELECT DISTINCT
+        VSA.SIdentifier,
+        VSA.SREventID,
+        CONVERT(NVARCHAR(12),FIRSTVISIT.TStartDate,106) AS FPVStartDate,
+        CONVERT(NVARCHAR(12),FIRSTVISIT.TStartDate,108) AS FPVStartTime,
+        (SELECT WUIScript FROM WTCRFUserInterface WHERE WUIAreaID=1007 AND WUIName='Status ' + FIRSTVISIT.RESTName) AS FPVStatusStyle,
+        FIRSTVISIT.RESTName AS FPVRESTName,
+        VSA.StudySummary AS FPVStudySummary,
+        FIRSTVISIT.PSummary AS FPVPSummary,
+        FIRSTVISIT.VisitTypeSummary AS FPVVistTypeSummary,
+        CONVERT(NVARCHAR(12),LASTVISIT.TStartDate,106) AS LVStartDate,
+        CONVERT(NVARCHAR(12),LASTVISIT.TStartDate,108) AS LVStartTime,
+        (SELECT WUIScript FROM WTCRFUserInterface WHERE WUIAreaID=1007 AND WUIName='Status ' + LASTVISIT.RESTName) AS LVStatusStyle,
+        LASTVISIT.RESTName AS LVRESTNAME,
+        VSA.StudySummary AS LVStudySummary,
+        LASTVISIT.PSummary AS LVPSummary,
+        LASTVISIT.VisitTypeSummary AS LVVisitTypeSummary,
+        FIRSTVISIT.LocationName AS FLocation,
+        LASTVISIT.LocationName AS LLocation,
+        CONVERT(NVARCHAR(12),FIRSTRECRUITED.PSRecruitmentDate,106) AS FirstRecruited
+        FROM
+        view_StudyAmendments VSA
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) STUDY ON VSA.REAreaID=STUDY.WAreaID
+
+        OUTER APPLY (SELECT TOP 1 TStartDate, RESTName, REStatusID, PSummary, VisitTypeName, VisitTypeSummary, LocationName, RAreaID
+        FROM view_PatientEvents VPE
+        LEFT OUTER JOIN WTCRFPatients WP ON WP.PatientID=VPE.PatientID
+        WHERE
+        VPE.SREventID=VSA.SREventID
+        AND
+        ((@Status IS NULL) OR (REStatusID IN (SELECT Status FROM @Statuses)))
+        ORDER BY VPE.TStartDate ASC) FIRSTVISIT
+
+        OUTER APPLY (SELECT TOP 1 TStartDate, RESTName, REStatusID, PSummary, VisitTypeName, VisitTypeSummary, LocationName, RAreaID
+        FROM view_PatientEvents VPE
+        LEFT OUTER JOIN WTCRFPatients WP ON WP.PatientID=VPE.PatientID
+        WHERE
+        VPE.SREventID=VSA.SREventID
+        AND
+        ((@Status IS NULL) OR (REStatusID IN (SELECT Status FROM @Statuses)))
+        ORDER BY VPE.TStartDate DESC) LASTVISIT
+
+        OUTER APPLY (SELECT TOP 1 PSRecruitmentDate, VPS.RAreaID
+        FROM view_PatientStudies VPS
+        INNER JOIN view_PatientEvents VPE ON VPE.PatientID=VPS.PatientID AND VPE.SREventID=VPS.SREventID
+        WHERE
+        VPS.SREventID=VSA.SREventID
+        AND PSSTSubTypeID=1
+        ORDER BY PSRecruitmentDate ASC) FIRSTRECRUITED
+
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) PATIENTSLAST ON FIRSTVISIT.RAreaID=PATIENTSLAST.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) PATIENTSFIRST ON LASTVISIT.RAreaID=PATIENTSFIRST.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) PATIENTSRECRUIT ON FIRSTRECRUITED.RAreaID=PATIENTSRECRUIT.WAreaID
+        WHERE
+        SAStatusSubID IS NOT NULL
+        AND
+        (LASTVISIT.VisitTypeName IS NOT NULL OR FIRSTVISIT.VisitTypeName IS NOT NULL)
+        AND
+        ((@Status IS NULL) OR (FIRSTVISIT.REStatusID IN (SELECT Status FROM @Statuses)) OR (LASTVISIT.REStatusID IN (SELECT Status FROM @Statuses)))
+        AND
+        ((@StudySummary IS NULL) OR (VSA.StudySummary LIKE @StudySummary))
+        AND
+        ((@Site IS NULL) OR ((FIRSTVISIT.LocationName IN (SELECT ResourceName FROM view_Resources WHERE ROwnerID=@Site)) OR (LASTVISIT.LocationName IN (SELECT ResourceName FROM view_Resources WHERE ROwnerID=@Site))))
+        ORDER BY
+        VSA.SIdentifier,
+        FPVStartDate,
+        FPVStartTime
+
+        SET @TotalRecords=@@ROWCOUNT;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <!-- How savage! -->
+      <xsl:template name="insertLineBreaks">
+        <xsl:param name="textValue" />
+        <xsl:choose>
+          <xsl:when test="contains($textValue, '&#xA;')">
+            <xsl:value-of select="substring-before($textValue,'&#xA;')" />
+            <br />
+            <xsl:call-template name="insertLineBreaks">
+              <xsl:with-param name="textValue" select="substring-after($textValue,'&#xA;')" />
+            </xsl:call-template>
+          </xsl:when>
+          <xsl:otherwise>
+            <xsl:value-of select="$textValue" />
+          </xsl:otherwise>
+        </xsl:choose>
+      </xsl:template>
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>First Patient First Visit and Last Patient Visit Per Study</h1>
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <tr>
+                <td>
+                  Study
+                </td>
+                <td>
+                  FPFV Patient
+                </td>
+                <td>
+                  FPFV Visit Type
+                </td>
+                <td>
+                  FPFV Start Date
+                </td>
+                <td>
+                  FPFV Location
+                </td>
+                <td>
+                  FPFV Status
+                </td>
+                <td>
+                  LPLV Patient
+                </td>
+                <td>
+                  LPLV Visit Type
+                </td>
+                <td>
+                  LPLV Start Date
+                </td>
+                <td>
+                  LPLV Location
+                </td>
+                <td>
+                  LPLV Status
+                </td>
+                <td>
+                  First Recruited
+                </td>
+              </tr>
+            </thead>
+            <xsl:apply-templates select="Visits" />
+          </table>
+        </div>
+      </xsl:template>
+      <xsl:template match="Visits">
+        <tr>
+          <td>
+            <xsl:value-of select="FPVStudySummary" />
+          </td>
+          <td>
+            <xsl:value-of select="FPVPSummary" />
+          </td>
+          <td>
+            <xsl:value-of select="FPVVistTypeSummary" />
+          </td>
+          <td>
+            <xsl:value-of select="FPVStartDate" />
+          </td>
+          <td>
+            <xsl:value-of select="FLocation" />
+          </td>
+          <td style="{FPVStatusStyle}">
+            <xsl:value-of select="FPVRESTName" />
+          </td>
+          <td>
+            <xsl:value-of select="LVPSummary" />
+          </td>
+          <td>
+            <xsl:value-of select="LVVisitTypeSummary" />
+          </td>
+          <td>
+            <xsl:value-of select="LVStartDate" />
+          </td>
+          <td>
+            <xsl:value-of select="LLocation" />
+          </td>
+          <td style="{LVStatusStyle}">
+            <xsl:value-of select="LVRESTNAME" />
+          </td>
+          <td>
+            <xsl:value-of select="FirstRecruited" />
+          </td>
+        </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

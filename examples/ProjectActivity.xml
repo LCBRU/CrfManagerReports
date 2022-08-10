@@ -1,0 +1,198 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="Events">
+      <crf:searchOptions>
+        <crf:parameter name="TimeSpanType" type="nvarchar" displayName="Show activity during">
+          <crf:query>
+            SELECT
+            'Today' AS TextField,'Today' AS ValueField
+            UNION ALL
+            SELECT
+            'This week','ThisWeek'
+            UNION ALL
+            SELECT
+            'This month','ThisMonth'
+            UNION ALL
+            SELECT
+            'This year','ThisYear'
+            UNION ALL
+            SELECT
+            'This financial year','ThisFinancialYear'
+            UNION ALL
+            SELECT
+            'Last financial year','LastFinancialYear'
+            UNION ALL
+            SELECT
+            'Last financial year','LastFinancialYear'
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StartDate" type="datetime" displayName="or on or after">
+          <crf:parameter name="EndDate" type="datetime" displayName=" and before" />
+        </crf:parameter>
+        <crf:parameter name="StudySummary" type="nvarchar" displayName="where the study name or identifier" useSearchConditions="true" maxLength="40" />
+        <crf:parameter name="Name" type="nvarchar" displayName="where the name" useSearchConditions="true" maxLength="40" />
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @TimeSpanType NVARCHAR(50);
+        DECLARE @StudySummary NVARCHAR(50);
+        DECLARE @Name NVARCHAR(50);
+
+        IF (@ItemID IS NOT NULL)
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue NVARCHAR(50)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StartDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='StartDate';
+        SELECT @EndDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='EndDate';
+        SELECT @TimeSpanType=FieldValue FROM @ViewParams WHERE FieldName='TimeSpanType';
+        SELECT @Name=FieldValue FROM @ViewParams WHERE FieldName='Name';
+        SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary';
+        END
+
+        IF (@StartDate IS NULL) AND (@EndDate IS NULL)
+        BEGIN
+        EXEC get_TimeSpan @TimeSpanType,@StartDate OUTPUT,@EndDate OUTPUT;
+        END;
+
+        SELECT
+        VS.RESummary,
+        VRE.ResourceName,
+        COALESCE(WREAT.REATName,VRE.REName) AS REName,
+        SUM(DATEDIFF(minute,VRE.TStartDate,VRE.TEndDate))/60 AS TotalHours,
+        SUM(DATEDIFF(minute,VRE.TStartDate,VRE.TEndDate))%60 AS TotalMinutes
+        FROM
+        view_ResourceEvents VRE INNER JOIN WTCRFResourceChildEvents WRCE ON VRE.REventID=WRCE.RECEChildID
+        INNER JOIN view_Studies VS ON WRCE.RECERootID=VS.SREventID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) STUDY ON VS.REAreaID=STUDY.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) RESOURCE ON VRE.RAreaID=RESOURCE.WAreaID
+        INNER JOIN WTCRFContacts WC ON WC.CResourceID=VRE.ResourceID
+        LEFT OUTER JOIN WTCRFResourceEventActivityTypes WREAT ON VRE.REActivityID=WREAT.REActivityTypeID
+        WHERE
+        (@StudySummary IS NULL OR VS.RESummary LIKE @StudySummary)
+        AND (VRE.ResourceTypeID=1013)
+        AND (VRE.RESTSubTypeID=5)
+        AND (@Name IS NULL OR WC.CDName LIKE @Name OR WC.CName LIKE @Name)
+        AND (VRE.TStartDate&gt;=@StartDate) AND (VRE.TStartDate&lt;@EndDate)
+        AND (DATEDIFF(day,TStartDate,TEndDate)=0)
+        GROUP BY
+        VS.RESummary,
+        VRE.ResourceName,
+        VRE.REName,
+        WREAT.REATName
+        ORDER BY
+        VS.RESummary,
+        VRE.ResourceName,
+        WREAT.REATName,
+        VRE.REName;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Projects">
+      <crf:statement>
+        SELECT
+        VS.RESummary,
+        SUM(DATEDIFF(minute,VRE.TStartDate,VRE.TEndDate))/60 AS TotalHours,
+        SUM(DATEDIFF(minute,VRE.TStartDate,VRE.TEndDate))%60 AS TotalMinutes
+        FROM
+        view_ResourceEvents VRE INNER JOIN WTCRFResourceChildEvents WRCE ON VRE.REventID=WRCE.RECEChildID
+        INNER JOIN WTCRFContacts WC ON WC.CResourceID=VRE.ResourceID
+        INNER JOIN view_Studies VS ON WRCE.RECERootID=VS.SREventID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) STUDY ON VS.REAreaID=STUDY.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) RESOURCE ON VRE.RAreaID=RESOURCE.WAreaID
+        WHERE
+        (@StudySummary IS NULL OR VS.RESummary LIKE @StudySummary)
+        AND (VRE.ResourceTypeID=1013)
+        AND (VRE.RESTSubTypeID=5)
+        AND (VRE.TStartDate&gt;=@StartDate) AND (VRE.TStartDate&lt;@EndDate)
+        AND (@Name IS NULL OR WC.CDName LIKE @Name OR WC.CName LIKE @Name)
+        AND (DATEDIFF(day,TStartDate,TEndDate)=0)
+        GROUP BY
+        VS.RESummary
+        ORDER BY
+        VS.RESummary;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        CONVERT(NVARCHAR(12),@StartDate,106) AS FormattedStartDate,
+        CONVERT(NVARCHAR(12),@EndDate,106) AS FormattedEndDate;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Project Activity</h1>
+          <div class="paragraph">
+            Project activity on or after <xsl:value-of select="Configuration/FormattedStartDate" />
+            and before <xsl:value-of select="Configuration/FormattedEndDate" />.
+          </div>
+          <h2>Staff Time</h2>
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <tr>
+                <td>Staff</td>
+                <td>Activity</td>
+                <td>Time (Hours:Minutes)</td>
+              </tr>
+            </thead>
+            <xsl:apply-templates select="Projects" />
+          </table>
+        </div>
+      </xsl:template>
+
+
+      <xsl:template match="Projects">
+        <tr>
+          <td colspan="3" class="section_head">
+            <xsl:value-of select="RESummary" />
+          </td>
+        </tr>
+        <xsl:apply-templates select="/NewDataSet/Events[(./RESummary=current()/RESummary)]"/>
+        <tr class="section_foot">
+          <td colspan="2" align="right">
+            Total
+          </td>
+          <td>
+            <xsl:value-of select="format-number(TotalHours,'0')" />:<xsl:value-of select="format-number(TotalMinutes,'00')" />
+          </td>
+        </tr>
+      </xsl:template>
+
+
+      <xsl:template match="Events">
+        <tr>
+          <td>
+            <xsl:value-of select="ResourceName" />
+          </td>
+          <td>
+            <xsl:value-of select="REName" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="format-number(TotalHours,'0')" />:<xsl:value-of select="format-number(TotalMinutes,'00')" />
+          </td>
+        </tr>
+      </xsl:template>
+      
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

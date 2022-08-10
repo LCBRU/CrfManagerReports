@@ -1,0 +1,666 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="RoomBookings">
+      <crf:searchOptions>
+        <crf:parameter name="StartDate" type="datetime" displayName="RoomBooking on or after">
+          <crf:parameter name="EndDate" type="datetime" displayName="and before"/>
+        </crf:parameter>
+        <crf:parameter name="DataSet" type="int" displayName="Specify dataset to report on " defaultValue="1">
+          <crf:query>
+
+            SELECT
+            1 AS ValueField,
+            '1: All Bookings - All room use' AS TextField
+            UNION ALL
+            SELECT
+            2 AS ValueField,
+            '2: All Study Use - Bookings associated with patient and non patient study use' AS TextField
+            UNION ALL
+            SELECT
+            3 AS ValueField,
+            '3: Patient Only - Bookings associated with patient visits' AS TextField
+            UNION ALL
+            SELECT
+            4 AS ValueField,
+            '4: Non Patient Study use - Bookings associated with non patient study use' AS TextField
+            UNION ALL
+            SELECT
+            5 AS ValueField,
+            '5: Non Study Bookings -  Bookings not associated with a study or patient' AS TextField
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StudySummary" type="nvarchar" maxLength="50" useSearchConditions="true" displayName="Where the study identifier or name" />
+        <crf:parameter name="LocationName" type="nvarchar" maxLength="50" useSearchConditions="true" displayName="Where the room name" />
+        <crf:parameter name="StatusList" type="nvarchar" displayName="Display Room bookings of the following status" multiSelect="true" columns="2">
+          <crf:query>
+            SELECT
+            REStatusTypeID AS ValueField,
+            RESTName AS TextField
+            FROM
+            view_ResourceEventStatusTypes VREST INNER JOIN
+            (SELECT DISTINCT REStatusID FROM view_ResourceEvents WHERE (ResourceTypeID IN (1010,1018))) VRE ON VREST.REStatusTypeID=VRE.REStatusID
+            ORDER BY
+            RESTName;
+          </crf:query>
+        </crf:parameter>
+
+      </crf:searchOptions>
+
+
+
+      <crf:statement>
+        /*
+        INTERNALNAME:SQL_1007_3_RoomUsage_Report.xml
+        BUGID: 003788
+        CUSTOM/SOURCE: Source
+        INPUT FILTERS:
+        HARDCODED:
+        If non study
+
+        PUBLIC DESCRIPTION:
+        Report will collated all clinical accomodation bookings displaying room location, time duration and booking title and notes.
+        Users can select range of bookings to display by date range, study,room, booking status,
+        Users can select which subsets of data to display (study, non study, patient or non patient bookings)
+        The study filter is only implimented when datasets 2-4 are selected.
+        Study details and visit names will only be displayed if the user has rights to view the study.
+        Room booking notes, titles and creator notes are not displayed for study bookings if users do not have rights to study data.
+        Room booking notes, titles and creator notes are not displayed if users do not have rights to patient data.
+
+        OUTPUT FIELDS:
+        ResourceName
+        StudyIdentifier
+        StudyName
+        VisitName
+        VisitType
+        Flag:Study/NonStudy
+        Flag: patient/other
+        Start Date/End Date
+        Start Time/End Time
+        Duration (Decimal hours)
+        Booking Status
+        Booking Title
+        Booking Notes
+        Booking Creator notes
+        Booking Created by
+        
+        NOTES:
+        Originally a custom report for Southampton. UCL neurology and Birmingham BCH had the report as custom.
+        Possible change to sort order in outputs needed.
+
+        *****/
+
+
+        SET NOCOUNT ON;
+
+        /** Get Parameters Some examples below **/
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @LocationName NVARCHAR(500);
+        DECLARE @StudySummary NVARCHAR(50);
+        DECLARE @SiteID NVARCHAR(50);
+        DECLARE @Dataset INT;
+        DECLARE @StatusList NVARCHAR(max);
+        DECLARE @PatientRights NVARCHAR(100);
+        DECLARE @StudyRights NVARCHAR(100);
+        DECLARE @Restricted NVARCHAR(20);
+
+        SET @Restricted='--'
+
+        IF ( @ItemID IS NOT NULL )
+        BEGIN
+        IF EXISTS( SELECT * FROM WTCRFStateFields WHERE WSFStateID=@ItemID )
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue VARCHAR(MAX)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StartDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='StartDate';
+        SELECT @EndDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='EndDate';
+        SELECT @LocationName=FieldValue FROM @ViewParams WHERE FieldName='LocationName'
+        SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary'
+        SELECT @Dataset=FieldValue FROM @ViewParams WHERE FieldName='Dataset'
+        SELECT @StatusList=FieldValue FROM @ViewParams WHERE FieldName='StatusList';
+        SELECT @PatientRights=0 --default to no rights
+        SELECT @StudyRights=0 --default to no rights
+        END
+        END
+
+        /* check for incompatible setting
+        Any study string set in the filters is not considered for datasets 1 or 5
+        Otherwise - you would have all non study bookings plus a subset of study bookings*/
+        IF ( (SELECT @Dataset ) IN (1,5))
+        BEGIN
+        SET @StudySummary=NULL
+        END
+
+
+        /*Set up the list of status IDs to use*/
+        DECLARE @BookingStatus TABLE
+        (
+        StatusID INT PRIMARY KEY,
+        StatusName nvarchar(100)
+        )
+
+        INSERT INTO @BookingStatus
+        SELECT
+        R.ItemID,
+        VREST.RESTName
+        FROM
+        dbo.get_IntegerTable(@StatusList) R
+        INNER JOIN view_ResourceEventStatusTypes VREST  ON R.ItemID=VREST.REStatusTypeID;
+
+
+        /*Collate all roombookings regardless of use then annotate with detail*/
+        /*Note Even bookings associated with studies which the user does not have rights to see will populated*/
+        DECLARE @RoomBooking TABLE(
+        RoomBookingReportingID	UNIQUEIDENTIFIER	NOT NULL,
+        RoomBookingID	    UNIQUEIDENTIFIER	NOT NULL,
+        RoomBookingIndex	INT	NOT NULL,
+        RoomBookingSiteID	UNIQUEIDENTIFIER	,
+        RoomBookingSitename	NVARCHAR(100)	NULL,
+        RoomBookingRoomID	UNIQUEIDENTIFIER	NOT NULL,
+        RoomBookingRoomName	NVARCHAR(300)	NULL,
+        RoomBookingTitle NVARCHAR(50) NULL,
+        RoomBookingVisitID	UNIQUEIDENTIFIER	NULL,
+        RoomBookingVisitTypeID	NVARCHAR(100)	NULL,
+        RoomBookingVisitName	NVARCHAR(300)	NULL,
+        RoomBookingVisitType	NVARCHAR(100)	NULL,
+        RoomBookingStudyID	UNIQUEIDENTIFIER	NULL,
+        RoomBookingStudyAreaID	INT	NULL,
+        RoomBookingStudyIdentifier	VARCHAR(50)	NULL,
+        RoomBookingStudyName	NVARCHAR(300)	NULL,
+        RoomBookingStudyTitle	NVARCHAR(max)	NULL,
+        RoomBookingStudySummary	NVARCHAR(1000)	NULL,
+        RoomBookingDetailAmendmentID	UNIQUEIDENTIFIER	NULL,
+        RoomBookingArea	INT	NOT NULL,
+        RoomBookingReason NVARCHAR(20) NOT NULL,
+        RoomBookingStudyUse NVARCHAR(20)  NULL,
+        RoomBookingStatusID	INT	NOT NULL,
+        RoomBookingStatus	NVARCHAR(100)	NULL,
+        RoomBookingStatusSubTypeID	SMALLINT	NULL,
+        RoomBookingCoreID	UNIQUEIDENTIFIER	NULL,
+        RoomBookingCoreArea	NVARCHAR(100)	NULL,
+        RoomBookingStartDate	NVARCHAR(20)	NULL,
+        RoomBookingEndDate	NVARCHAR(20)	NULL,
+        RoomBookingStartTime	NVARCHAR(5)	NULL,
+        RoomBookingEndTime	NVARCHAR(5)	NULL,
+        RoomBookingDurationDays	INT	NULL,
+        RoomBookingDurationMinutes	INT	NULL,
+        RoomBookingDurationHours DECIMAL(6,2),
+        RoomBookingDateLabel DATETIME,
+        RoomBookingNotes NVARCHAR (MAX),
+        RoomBookingCreatorNotes NVARCHAR (MAX),
+        RoomBookingCreator NVARCHAR(300)
+        )
+
+        INSERT INTO @RoomBooking (RoomBookingReportingID, RoomBookingID, RoomBookingIndex, RoomBookingSiteID, RoomBookingRoomID,
+        RoomBookingRoomName, RoomBookingArea, RoomBookingReason, RoomBookingStatusID, RoomBookingStatus, RoomBookingStatusSubTypeID, RoomBookingStartDate,
+        RoomBookingEndDate, RoomBookingStartTime,RoomBookingEndTime , RoomBookingDurationDays, RoomBookingDurationMinutes,
+        RoomBookingDurationHours, RoomBookingDateLabel, RoomBookingCreator )
+        SELECT
+        NEWID(),
+        WRE.ReventID,
+        1,
+        VR.ROwnerID,
+        VR.ResourceID,
+        VR.ResourceName,
+        WRE.REAreaID,
+        CASE WHEN (WRE.REAreaID=301) THEN 'PATIENT' ELSE 'NONPATIENT' END AS BookingReason,
+        WRE.REStatusID,
+        VREST.RESTName,
+        VREST.RESTSubTypeID,
+        CONVERT(NVARCHAR(20),WRE.REStartDate,106),
+        CONVERT(NVARCHAR(20),WRE.REEndDate,106),
+        CONVERT(VARCHAR(5),WRE.REStartDate,108) AS StartTime,
+        CONVERT(VARCHAR(5),WRE.REEndDate,108) AS EndTime,
+        CASE
+        WHEN (DATEDIFF(day,WRE.REStartDate,WRE.REEndDate))=0 THEN 1
+        --this accomodates midnight endings
+        WHEN (WRE.REEndDate = DATEADD(d, (DATEDIFF(day,WRE.REStartDate,WRE.REEndDate)), DATEDIFF(d, 0,  WRE.REStartDate))) THEN (DATEDIFF(day,WRE.REStartDate,WRE.REEndDate))
+        ELSE (DATEDIFF(day,WRE.REStartDate,WRE.REEndDate)+1) END AS RoomBookingDurationDays,
+        (DATEDIFF(Minute, WRE.REStartDate,WRE.REEndDate)) AS RoomBookingDurationMinutes,
+        CONVERT(DECIMAL(6,2), (convert (FLOAT,(DATEDIFF(Minute, WRE.REStartDate,WRE.REEndDate))))/60) AS DurationHours,
+        (DATEADD (day , 0, WRE.REStartDate)) AS DateLabel,
+        VU.DisplayName
+        FROM
+        view_Resources VR
+        INNER JOIN WTCRFResourceEvents WRE ON VR.ResourceID=WRE.REResourceID
+        INNER JOIN view_ResourceEventStatusTypes VREST ON WRE.REStatusID=VREST.REStatusTypeID
+        INNER JOIN view_Users VU ON WRE.RECreatorID=VU.UserID
+        LEFT OUTER JOIN @BookingStatus BS ON WRE.REStatusID=BS.StatusID
+        WHERE
+        (REArchive=0)
+        AND
+        (REDeleted=0)
+        AND (RTAllowGenericEventAdd=1)
+        AND (WRE.REStartDate&gt;=@StartDate AND WRE.REStartDate&lt;@EndDate)
+        AND VR.ResourceTypeID in ('1010', '1018')
+        AND (@LocationName IS NULL OR (VR.ResourceName LIKE @LocationName))
+        AND (@StatusList IS NULL OR BS.StatusID IS NOT NULL)
+
+
+        /*Add quick flag to all bookings that are study related events*/
+        UPDATE FB
+        SET FB.RoomBookingStudyUse='STUDY'
+        FROM @RoomBooking FB
+        INNER JOIN WTCRFResourceChildEvents RCE ON FB.RoomBookingID=RCE.RECEChildID
+        INNER JOIN view_studies VS ON RCE.RECERootID=VS.SREventID
+
+
+        /*Add details in for study events if user has right
+        --these are the visit associated events */
+
+        UPDATE FB
+        SET
+        FB.RoomBookingVisitID=WREVISIT.REventID,
+        FB.RoomBookingVisitTypeID=WRVISIT.ResourceID,
+        FB.RoomBookingVisitType=WRVISIT.RName,
+        FB.RoomBookingVisitName=WREVISIT.REName,
+        FB.RoomBookingCoreID=WRCORE.ResourceID,
+        FB.RoomBookingCoreArea=WRCORE.RName,
+        FB.RoomBookingDetailAmendmentID=WREAMEND.REventID,
+        FB.RoomBookingStudyID=WRCE.RECERootID,
+        FB.RoomBookingStudyAreaID=WRESTUDY.REAreaID,
+        FB.RoomBookingStudyIdentifier=VS.SIdentifier ,
+        FB.RoomBookingStudyName=VS.Sname,
+        FB.RoomBookingStudyTitle=VS.stitle,
+        FB.RoomBookingStudySummary=VS.RESummary,
+        FB.RoomBookingTitle=WRE.REName,
+        FB.RoomBookingNotes=WRE.REDescription,
+        FB.RoomBookingCreatorNotes=WRE.RECreatorNotes
+        FROM @RoomBooking FB
+        INNER JOIN WTCRFResourceEvents WRE ON FB.RoomBookingID=WRE.REventID
+        INNER JOIN WTCRFResourceChildEvents WRCE ON WRE.REVENTID=WRCE.RECEChildID --room is child of visit
+        INNER JOIN WTCRFResourceEvents WREVISIT ON WRCE.RECEParentID=WREVISIT.REventID  --visit booking event details
+        INNER JOIN WTCRFResources WRVISIT ON WRVISIT.ResourceID=WREVISIT.REResourceID  --visit resource
+        INNER JOIN WTCRFResourceChildEvents WRCE2 ON WREVISIT.REventID=WRCE2.RECEChildID  --visit child of core
+        INNER JOIN WTCRFResourceEvents WRECORE ON WRCE2.RECEParentID=WRECORE.REventID --core booking event details
+        INNER JOIN WTCRFResources WRCORE ON WRCORE.ResourceID=WRECORE.REResourceID  --core resource details
+        INNER JOIN view_ResourceTypes VRTCORE ON VRTCORE.ResourceTypeID=WRCORE.RResourceType -- core area resource type
+        INNER JOIN WTCRFResourceChildEvents WRCE3 ON WRECORE.REventID=WRCE3.RECEChildID  --core child of DA
+        INNER JOIN WTCRFResourceEvents WREAMEND ON WRCE3.RECEParentID=WREAMEND.REventID --dA child of Study
+        INNER JOIN WTCRFResourceEvents WRESTUDY ON WRCE3.RECERootID=WRESTUDY.REventID --study event
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) STUDYRIGHTS ON WRESTUDY.REAreaID=STUDYRIGHTS.WAreaID
+        INNER JOIN view_studies VS ON WRESTUDY.REventID =VS.SREventID  --study
+        WHERE VRTCORE.RTName ='Core Area'
+        AND FB.RoomBookingStudyUse='STUDY'
+
+        /*Add details in for study events if user has right
+        --these are the non visit study associated events */
+        UPDATE FB
+        SET
+        FB.RoomBookingCoreID=WRCORE.ResourceID,
+        FB.RoomBookingCoreArea=WRCORE.RName,
+        FB.RoomBookingDetailAmendmentID =WREAMEND.REventID,
+        FB.RoomBookingStudyID=WRCE.RECERootID,
+        FB.RoomBookingStudyAreaID=WRESTUDY.REAreaID,
+        FB.RoomBookingStudyIdentifier=VS.SIdentifier ,
+        FB.RoomBookingStudyName=VS.Sname,
+        FB.RoomBookingStudyTitle=VS.stitle,
+        FB.RoomBookingStudySummary=VS.RESummary,
+        FB.RoomBookingTitle=WRE.REName,
+        FB.RoomBookingNotes=WRE.REDescription,
+        FB.RoomBookingCreatorNotes=WRE.RECreatorNotes
+        FROM @RoomBooking FB
+        INNER JOIN WTCRFResourceEvents WRE ON FB.RoomBookingID=WRE.REventID --ROOM BOOKING
+        INNER JOIN WTCRFResourceChildEvents WRCE ON WRE.REventID=WRCE.RECEChildID --room is child of core
+        INNER JOIN WTCRFResourceEvents WRECORE ON WRCE.RECEParentID=WRECORE.REventID --core booking event details
+        INNER JOIN WTCRFResources WRCORE ON WRCORE.ResourceID=WRECORE.REResourceID  --core resource details
+        INNER JOIN view_ResourceTypes VRTCORE ON VRTCORE.ResourceTypeID=WRCORE.RResourceType -- core area resource type
+        INNER JOIN WTCRFResourceChildEvents WRCE3 ON WRECORE.REventID=WRCE3.RECEChildID  --core child of DA
+        INNER JOIN WTCRFResourceEvents WREAMEND ON WRCE3.RECEParentID=WREAMEND.REventID --dA child of Study
+        INNER JOIN WTCRFResourceEvents WRESTUDY ON WRCE3.RECERootID=WRESTUDY.REventID --study event
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) STUDYRIGHTS ON WRESTUDY.REAreaID=STUDYRIGHTS.WAreaID
+        INNER JOIN view_studies VS ON WRESTUDY.REventID =VS.SREventID  --study
+        WHERE VRTCORE.RTName ='Core Area'
+        AND FB.RoomBookingStudyUse='STUDY'
+
+        /* Get the details needed for non study events*/
+        UPDATE FB
+        SET FB.Roombookingstudyuse='NONSTUDY',
+        FB.RoomBookingTitle=WRE.REName,
+        FB.RoomBookingNotes=WRE.REDescription,
+        FB.RoomBookingCreatorNotes=WRE.RECreatorNotes
+        FROM @RoomBooking FB
+        INNER JOIN WTCRFResourceEvents WRE ON FB.RoomBookingID=WRE.REventID --ROOM BOOKING
+        WHERE FB.RoomBookingStudyUse IS NULL
+
+
+        /*Check if the user has rights to view patient details- Area=Pateints (301)
+        This removes room booking notes/title and creator notes on patient bookings if user does not have patient view rights
+        basically as some sites put patient information into the notes and titles*/
+        IF NOT EXISTS
+        (SELECT
+        VA.WAreaID
+        FROM view_Areas VA
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) PATIENT ON VA.WAreaID=PATIENT.WAreaID
+        WHERE VA.WAreaID = 301
+        )
+        BEGIN
+        UPDATE @RoomBooking
+        SET RoomBookingNotes=@Restricted,
+        RoomBookingTitle=@Restricted,
+        RoomBookingCreatorNotes=@Restricted
+        WHERE RoomBookingArea=301
+        END
+        ELSE
+        SELECT @PatientRights=1
+
+        /*Check if the user has rights to see studies. If not then all the study information columns will be empty
+        want to hide them in the report*/
+        IF EXISTS
+        (SELECT
+        VA.WAreaID
+        FROM view_Areas VA
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) PATIENT ON VA.WAreaID=PATIENT.WAreaID
+        WHERE VA.WAreaID = 31
+        )
+        BEGIN
+        SELECT @StudyRights=1
+        END
+
+        /** Criteria to select datasets**/
+
+        /* this is all study associated bookings only*/
+        IF ((SELECT @Dataset)=2)
+        BEGIN
+        SELECT
+        *
+        FROM @RoomBooking RB
+        WHERE RB.RoomBookingStudyUse='STUDY'
+        AND (@StudySummary IS NULL OR ((RB.RoomBookingStudyName LIKE @StudySummary) OR (RoomBookingStudyIdentifier LIKE @StudySummary)))
+        ORDER BY RoomBookingDateLabel, RoomBookingStartTime,RoomBookingStudyName,RoomBookingRoomName
+        END
+
+        /* this is study and patient only */
+        ELSE IF ((SELECT @Dataset)=3)
+        BEGIN
+        SELECT
+        *
+        FROM @RoomBooking RB
+        WHERE RoomBookingArea=301
+        AND (@StudySummary IS NULL OR ((RB.RoomBookingStudyName LIKE @StudySummary) OR (RoomBookingStudyIdentifier LIKE @StudySummary)))
+        ORDER BY RoomBookingDateLabel,RoomBookingStartTime,RoomBookingStudyName,RoomBookingRoomName
+        END
+
+        /* this is study and non patient only  */
+        ELSE IF ((SELECT @Dataset)=4)
+        BEGIN
+        SELECT
+        *
+        FROM @RoomBooking RB
+        WHERE RoomBookingArea!=301
+        AND RB.RoomBookingStudyUse='STUDY'
+        AND (@StudySummary IS NULL OR ((RB.RoomBookingStudyName LIKE @StudySummary) OR (RoomBookingStudyIdentifier LIKE @StudySummary)))
+        ORDER BY RoomBookingDateLabel,RoomBookingStartTime,RoomBookingStudyName,RoomBookingRoomName
+        END
+        /* this is non study only*/
+        ELSE IF ((SELECT @Dataset)=5)
+        BEGIN
+        SELECT
+        *
+        FROM @RoomBooking RB
+        WHERE RB.RoomBookingStudyUse='NONSTUDY'
+        ORDER BY RoomBookingDateLabel,RoomBookingStartTime,RoomBookingRoomName
+        END
+        /* option 1 - all bookings*/
+        ELSE
+        BEGIN
+        SELECT * FROM
+        @RoomBooking
+        ORDER BY RoomBookingDateLabel,RoomBookingStartTime,RoomBookingStudyName,RoomBookingRoomName
+        END
+
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="ReportTitle">
+      <crf:statement>
+        DECLARE @ReportTitle TABLE
+        (
+        Indx INT,
+        Title NVARCHAR(MAX)
+        )
+
+        INSERT INTO @ReportTitle
+        SELECT
+        1,
+        '1: All Bookings - All room use'
+        UNION ALL
+        SELECT
+        2,
+        '2: All Study Use - Bookings associated with patient and non patient study use'
+        UNION ALL
+        SELECT
+        3,
+        '3: Patient Only - Bookings associated with patient visits'
+        UNION ALL
+        SELECT
+        4,
+        '4: Non Patient Study use - Bookings associated with non patient study use'
+        UNION ALL
+        SELECT
+        5,
+        '5: Non Study Bookings -  Bookings not associated with a study or patient'
+
+
+        SELECT Title FROM @ReportTitle
+        WHERE INDX=@Dataset
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="Status">
+      <crf:statement>
+        SELECT
+        StatusID,
+        StatusName
+        FROM @BookingStatus
+      </crf:statement>
+    </crf:query>
+
+
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        @Dataset AS DataSelection,
+        CONVERT(NVARCHAR(12),@StartDate,106) AS FormattedStartDate,
+        CONVERT(NVARCHAR(12),@EndDate,106) AS FormattedEndDate,
+        @StudySummary AS StudySummaryString,
+        @LocationName AS RoomNameString,
+        @PatientRights AS ViewPatientRights,
+        @StudyRights AS ViewStudyRights;
+      </crf:statement>
+    </crf:query>
+
+  </crf:queryBatch>
+
+
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:crf-utils="crf:utilities" version="1.0">
+      <xsl:output method="html" indent="yes" omit-xml-declaration="yes" />
+      <xsl:variable name="ViewPatientRights" select="/NewDataSet/Configuration/ViewPatientRights"/>
+      <xsl:variable name="ViewStudyRights" select="/NewDataSet/Configuration/ViewStudyRights"/>
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Clinical Accommodation Bookings</h1>
+
+          <h2>
+            Report Settings <xsl:value-of select="/NewDataSet/ReportTitle/Title"/>
+          </h2>
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <tr>
+                <td colspan="2">
+                  Settings
+                </td>
+              </tr>
+            </thead>
+            <tr>
+              <td>
+                DataSet Selected
+              </td>
+              <td>
+                <xsl:value-of select="/NewDataSet/ReportTitle/Title"/>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Reporting Period
+              </td>
+              <td>
+                On or after <xsl:value-of select="/NewDataSet/Configuration/FormattedStartDate" />
+                and before <xsl:value-of select="/NewDataSet/Configuration/FormattedEndDate" />.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Study Identifier or Name filter:
+              </td>
+              <td>
+                <xsl:value-of select="/NewDataSet/Configuration/StudySummaryString" />
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Room name filter:
+              </td>
+              <td>
+                <xsl:value-of select="/NewDataSet/Configuration/RoomNameString" />
+              </td>
+            </tr>
+
+            <tr>
+              <td>
+                Booking status filters:
+              </td>
+              <td>
+                <xsl:for-each  select="/NewDataSet/Status">
+                  <li>
+                    <xsl:value-of select="StatusName" />
+                  </li>
+                </xsl:for-each>
+              </td>
+            </tr>
+            <xsl:if test="$ViewPatientRights!=1">
+              <tr style="background-color:#ff0000 ; color:#ffffff" >
+                <td colspan="2" >
+                  You do not have rights to view patient details so booking title and notes will not be displayed for patient bookings
+                </td>
+              </tr>
+            </xsl:if>
+            <xsl:if test="$ViewStudyRights!=1">
+              <tr style="background-color:#ff0000 ; color:#ffffff" >
+                <td colspan="2" >
+                  You do not have rights to view study details for the study information columns will be hidden from the report. Booking title and notes will not be displayed for Study bookings.
+                </td>
+              </tr>
+            </xsl:if>
+
+          </table>
+
+          <h4>Room Bookings</h4>
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <tr>
+                <td>RoomName</td>
+                <xsl:if test="$ViewStudyRights=1">
+                <td>Study</td>
+                <td>StudyName</td>
+                <td>VisitType</td>
+                <td>VisitName</td>
+                </xsl:if>
+                <td>StudyUse</td>
+                <td>Patient Use/Other</td>
+                <td>StartDate</td>
+                <td>EndDate</td>
+                <td>StartTime</td>
+                <td>EndTime</td>
+                <td>Duration (Hours)</td>
+                <td>Status</td>
+                <td>Booking Title</td>
+                <td>Booking Notes</td>
+                <td>Booking Creator Notes</td>
+                <td>Booking Created By</td>
+              </tr>
+            </thead>
+            <xsl:apply-templates select="RoomBookings" />
+          </table>
+        </div>
+      </xsl:template>
+
+
+      <xsl:template match="RoomBookings">
+        <tr>
+          <td>
+            <xsl:value-of select="RoomBookingRoomName" />
+          </td>
+          <xsl:if test="$ViewStudyRights=1">
+          <td>
+            <xsl:value-of select="RoomBookingStudyIdentifier" />
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingStudyName" />
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingVisitType"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingVisitName"/>
+          </td>
+          </xsl:if>
+          <td>
+            <xsl:value-of select="RoomBookingStudyUse"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingReason"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingStartDate"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingEndDate"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingStartTime"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingEndTime"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingDurationHours"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingStatus"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingTitle"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingNotes"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingCreatorNotes"/>
+          </td>
+          <td>
+            <xsl:value-of select="RoomBookingCreator"/>
+          </td>
+        </tr>
+      </xsl:template>
+
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

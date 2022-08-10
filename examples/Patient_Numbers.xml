@@ -1,0 +1,183 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="PatientNumbers">
+      <crf:searchOptions>
+        <crf:parameter name="TimeSpanType" type="datespan" displayName="Covering the time period of"/>
+        <crf:parameter name="StartDate" type="datetime" displayName="or starting on or after">
+          <crf:parameter name="EndDate" type="datetime" displayName=" and finishing before"/>
+        </crf:parameter>
+        <crf:parameter name="Status" type="nvarchar" displayName="include the following booking statuses" multiSelect="true" columns="3" initialSelection="All">
+          <crf:query>
+            SELECT
+            REStatusTypeID AS ValueField,
+            RESTName AS TextField
+            FROM
+            view_ResourceEventStatusTypes VREST INNER JOIN
+            (SELECT DISTINCT REStatusID FROM view_ResourceEvents WHERE (ResourceTypeID IN (1010,1018)) AND (REAreaID=301)) VRE ON VREST.REStatusTypeID=VRE.REStatusID
+            ORDER BY
+            RESTName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StudySummary" type="nvarchar" displayName="Where the study is" maxLength="500" useSearchConditions="false" areaID="300" autoCompleteName="Studies" />
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @TimeSpanType NVARCHAR(50);
+        DECLARE @StudySummary NVARCHAR(500);
+        DECLARE @Status NVARCHAR(MAX);
+
+        DECLARE @Statuses TABLE
+        (
+        Status INTEGER PRIMARY KEY
+        )
+
+
+        IF ( @ItemID IS NOT NULL )
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName NVARCHAR(40),
+        FieldValue NVARCHAR(400)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StartDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='StartDate';
+        SELECT @EndDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='EndDate';
+        SELECT @TimeSpanType=FieldValue FROM @ViewParams WHERE FieldName='TimeSpanType';
+        SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary';
+        SELECT @Status=FieldValue FROM @ViewParams WHERE FieldName='Status';
+        END
+
+        IF (@StartDate IS NULL) AND (@EndDate IS NULL)
+        BEGIN
+        EXEC get_TimeSpan @TimeSpanType,@StartDate OUTPUT,@EndDate OUTPUT;
+        END;
+
+
+        INSERT INTO @Statuses(Status)
+        SELECT
+        ItemID
+        FROM
+        dbo.get_IntegerTable(@Status);
+
+        SELECT
+        VRE_R.REName AS StudyName,
+        VRE.REStatusID,
+        COUNT(DISTINCT CONVERT(VARCHAR(50),VRE.ResourceID)) AS PatientCount
+        FROM
+        view_ResourceEvents VRE INNER JOIN WTCRFResourceChildEvents WRCE ON VRE.REventID = WRCE.RECEChildID INNER JOIN
+        view_ResourceEvents VRE_R ON VRE_R.REventID = WRCE.RECERootID
+        WHERE
+        (VRE.TStartDate&gt;=@StartDate) AND (VRE.TStartDate&lt;@EndDate)
+        AND (VRE.ResourceTypeID = 31) AND (VRE_R.ResourceTypeID = 32)
+        AND (VRE.ResourceID NOT IN (SELECT WR.ResourceID FROM WTCRFResources WR WHERE WR.RResourceType=31 AND WR.RAvailabilityID=1))
+        AND (@StudySummary IS NULL OR VRE_R.REName LIKE @StudySummary)
+        AND (@Status IS NULL OR VRE.REStatusID IN (SELECT Status FROM @Statuses))
+        GROUP BY
+        VRE_R.REName,
+        VRE.REStatusID
+        ORDER BY
+        VRE_R.REName;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        CONVERT(NVARCHAR(12),@StartDate,106) AS FormattedStartDate,
+        CONVERT(NVARCHAR(12),@EndDate,106) AS FormattedEndDate;
+      </crf:statement>      
+    </crf:query>
+  </crf:queryBatch>
+  <crf:title>Patients by Study</crf:title>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+      <xsl:output method="html" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+        <h1>Patient Numbers</h1>
+        <div class="paragraph">
+          Between <xsl:value-of select="Configuration/FormattedStartDate"/> and <xsl:value-of select="Configuration/FormattedEndDate"/>.
+        </div>
+        <table class="grid" cellpadding="3" cellspacing="0">
+          <thead>
+            <tr>
+              <td>
+                Study
+              </td>
+              <td>
+                No. of Patients
+              </td>
+            </tr>
+          </thead>
+          <xsl:apply-templates select="PatientNumbers"/>
+          <tr>
+            <td align="right">Total</td>
+            <td>
+              <xsl:value-of select="sum(/NewDataSet/PatientNumbers/PatientCount)"/>
+            </td>
+          </tr>
+        </table>
+        </div>
+      </xsl:template>
+
+      <xsl:template match="PatientNumbers">
+        <tr>
+          <td>
+            <xsl:value-of select="StudyName"/>
+          </td>
+          <td>
+            <xsl:value-of select="PatientCount"/>
+          </td>
+        </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+  <export id="1" title="Open in Excel" format="text/xml" outputFormat="application/vnd.ms-excel">
+    <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="no" />
+      <xsl:template match="NewDataSet">
+        <Workbook
+           xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+           xmlns:o="urn:schemas-microsoft-com:office:office"
+           xmlns:x="urn:schemas-microsoft-com:office:excel"
+           xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+           xmlns:html="http://www.w3.org/TR/REC-html40">
+          <Worksheet ss:Name="Patient Studies">
+            <Table>
+              <Column ss:AutoFitWidth="1"/>
+              <Row>
+                <Cell>
+                  <Data ss:Type="String">Study</Data>
+                </Cell>
+                <Cell>
+                  <Data ss:Type="String">No. of patients</Data>
+                </Cell>
+              </Row>
+              <xsl:for-each select="PatientNumbers">
+                <Row>
+                  <Cell>
+                    <Data ss:Type="String"><xsl:value-of select="StudyName"/></Data>
+                  </Cell>
+                  <Cell>
+                    <Data ss:Type="Number"><xsl:value-of select="PatientCount"/></Data>
+                  </Cell>
+                </Row>
+              </xsl:for-each>            
+            </Table>
+          </Worksheet>
+        </Workbook>
+      </xsl:template>
+    </xsl:stylesheet>
+  </export>
+</crf:areaConfiguration>

@@ -1,0 +1,702 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>S00020V01</crf:version>
+    <crf:analysis>Project Metrics</crf:analysis>
+    <crf:analysis>Recruitment</crf:analysis>
+    <crf:analysis></crf:analysis>
+
+    <crf:summary>Report recruitment performance to target</crf:summary>
+    <crf:notes>
+      Uses the start and end of recrutiment dates specified on the study level to calculate time period for recruitment
+      Uses the recruitment period, target for recruitment and the number of patients recruited to date to calculate how the study is performing to date 
+      Recruitment targets across all detail amendments are summed.
+      Target recruitment: By default the value of the field "Target recruitment for CRF aspect of trial" on the StudyDetail form (NIHRCRFTargetRecruit) is used - values for all amendments are summed.
+      Alternatively if the nursing clinical field option was checked:
+      Value of field "Total no. of subjects" on Nursing Clinical form (Nursing Clinical Form: ANCTotalSubjects) is used - values for all amendments summed up (if the study has amendments the cell is highlighted in grey).
+      Only Nursing Clinical cores are reported
+      A table with guidance regarding how each column is calculated is included in the report output.
+    </crf:notes>
+
+    <crf:InternalNotes>
+      BUGID:
+      Internal name: SQL_305_3_RecruitmentPerformance_Report.xml
+      Originally worked on with Fahimeh at Sheffield Childrens Hospital. Is now what they refer to as the BREG report
+</crf:InternalNotes>
+  </crf:comment>
+  
+  
+  
+  <crf:queryBatch>
+    <crf:query name="Recruitment">
+      <crf:searchOptions>
+        <crf:parameter name="StartDate" type="datetime" displayName="The recruitment start date is on or after">
+          <crf:parameter name="EndDate" type="datetime" displayName=" and before"/>
+        </crf:parameter>
+        <crf:parameter name="StudySummary" type="nvarchar" maxLength="30" useSearchConditions="true" displayName=" and the study number or name"/>
+        <crf:parameter name="Status" type="nvarchar" displayName="and the status of the study is" defaultText="Select status">
+          <crf:query>
+            SELECT
+            wobjname AS TextField,
+            wobjectid AS ValueField
+            FROM
+            WTCRFObjects
+            WHERE
+            wobjtype=35
+            ORDER BY
+            wobjname;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StudyType" type="nvarchar" displayName="and the study type is" defaultText="Select type">
+          <crf:query>
+            SELECT
+            RName AS TextField,
+            ResourceID AS ValueField
+            FROM
+            WTCRFResources
+            WHERE
+            RResourceType=32
+            ORDER BY
+            RName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="REITypeID" type="guid" displayName="include the following study identifier" defaultText="No identifier">
+          <crf:query>
+            SELECT
+            REITypeID AS ValueField,
+            REITName AS TextField
+            FROM
+            view_ResourceEventIdentifierTypes
+            WHERE
+            (REITResourceTypeID=32)
+            ORDER BY
+            REITName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="TargetField" type="bit" displayName="OPTION: Target recruitment values to be obtained from the ''Total no. of subject'' field on the Nursing Clinical Form" default="false" />
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @StudySummary NVARCHAR(500);
+        DECLARE @Status NVARCHAR(500);
+        DECLARE @StudyType NVARCHAR(500);
+        DECLARE @REITypeID UNIQUEIDENTIFIER;
+        DECLARE @TargetField BIT;
+
+        IF (@ItemID IS NOT NULL)
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(400),
+        FieldValue NVARCHAR(1000)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StartDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='StartDate';
+        SELECT @EndDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='EndDate';
+        SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary';
+        SELECT @Status=FieldValue FROM @ViewParams WHERE FieldName='Status';
+        SELECT @StudyType=FieldValue FROM @ViewParams WHERE FieldName='StudyType';
+        SELECT @REITypeID=CONVERT(UNIQUEIDENTIFIER,FieldValue) FROM @ViewParams WHERE FieldName='REITypeID';
+        SELECT @TargetField=FieldValue FROM @ViewParams WHERE FieldName='TargetField';
+
+        END;
+
+
+        /** Get a subset of studies. */
+        DECLARE @Studies TABLE
+        (
+        Idx INT IDENTITY(1,1),
+        RootEventID UNIQUEIDENTIFIER NOT NULL,
+        SAREventID UNIQUEIDENTIFIER NOT NULL,
+        SANumber INT
+        )
+
+        INSERT INTO @Studies (RootEventID,SAREventID,SANumber)
+        SELECT
+        SREventID,
+        SAREventID,
+        SANumber
+        FROM
+        view_StudyAmendments VSA
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) VUR ON VUR.WAreaID=VSA.REAreaID
+        WHERE
+        ((@StudySummary IS NULL) OR (SIdentifier LIKE @StudySummary) OR (SName LIKE @StudySummary))
+        AND
+        ((@StartDate IS NULL) OR (SRecruitmentStartDate&gt;=@StartDate))
+        AND ((@EndDate IS NULL) OR (SRecruitmentStartDate&lt;@EndDate))
+        AND
+        ((@Status IS NULL) OR (VSA.SAStatusID=@Status))
+        AND
+        ((@StudyType IS NULL) OR (SResourceID=@StudyType));
+
+
+        /** Get data for target recruitment field
+        The default is to use the NIHR field
+        unless the input option is checked and the field FAName='Nursing Clinical Form: ANCTotalSubjects' is used*/
+
+
+        DECLARE @Fields TABLE
+        (
+        RootID UNIQUEIDENTIFIER,
+        RecruitmentTarget INT
+        )
+
+        IF (@TargetField = 1)
+        BEGIN
+        INSERT INTO @Fields (RootID,RecruitmentTarget)
+        SELECT
+        VSC.RECERootID,
+        SUM(Rinteger)
+        FROM
+        view_Fields VF
+        LEFT OUTER JOIN view_Responses VR ON VF.FieldID=VR.FieldID
+        INNER JOIN WTCRFResourceEvents WRE ON VF.FRootID=WRE.REFieldID
+        INNER JOIN view_StudyCores VSC ON VSC.ACREventID=WRE.REventID
+        INNER JOIN @Studies VSA ON VSA.SAREventID=VSC.RECEParentID
+        WHERE
+        (FAName='Nursing Clinical Form: ANCTotalSubjects')
+        AND
+        ((VR.RStatusID) IS NULL OR (VR.RStatusID=1))
+        AND
+        VSC.CAreaID=40
+        GROUP BY
+        VSC.RECERootID;
+        END
+        ELSE
+        INSERT INTO @Fields (RootID,RecruitmentTarget)
+        SELECT
+        VSA.SREventID,
+        SUM(RInteger)
+        FROM
+        view_Fields VF
+        LEFT OUTER JOIN view_Responses VR ON VF.FieldID=VR.FieldID
+        INNER JOIN view_StudyAmendments VSA ON VR.FRootID=VSA.REFieldID
+        INNER JOIN @Studies S ON VSA.SAREventID=S.SAREventID
+        WHERE
+        (FAName='NIHRCRFTargetRecruit')
+        AND
+        ((VR.RStatusID) IS NULL OR (VR.RStatusID=1))
+        GROUP BY
+        VSA.SREventID
+
+
+
+        /** Get number of recruited participants for selected studies */
+        DECLARE @Recruitment TABLE
+        (
+        SREventID UNIQUEIDENTIFIER,
+        SAREventID UNIQUEIDENTIFIER,
+        Recruited INT
+        )
+
+        INSERT INTO @Recruitment (SREventID,SAREventID,Recruited)
+        SELECT
+        VPS.SREventID,
+        SAREventID,
+        COUNT(PatientStudyID)
+        FROM
+        view_PatientStudies VPS
+        INNER JOIN @Studies VSA ON VSA.RootEventID=VPS.SREventID
+        WHERE
+        PSRecruitmentDate IS NOT NULL
+        GROUP BY
+        VPS.SREventID,
+        SAREventID;
+
+
+        /** All date calculations exclude weekends.
+        Number of days between start and end date MINUS number of weeks times two (two days per weekend):
+        (DATEDIFF(day,StartDate, EndDate)-
+        (DATEDIFF(wk,StartDate, EndDate) * 2))  */
+
+
+        /** Get recruitment span between recruitment start date and recruitment end date for selected studies */
+        DECLARE @RecruitmentSpan TABLE
+        (
+        RecruitmentSpan INT,
+        SREventID UNIQUEIDENTIFIER
+        )
+
+        INSERT INTO @RecruitmentSpan (RecruitmentSpan,SREventID)
+        SELECT
+        CASE WHEN datename(weekday, SRecruitmentStartDate)
+        in ('Sunday')
+        THEN
+        (datediff(day, SRecruitmentStartDate, SRecruitmentEndDate)) / 7 * 5 + (datediff(day, SRecruitmentStartDate, SRecruitmentEndDate)) % 7 -
+        (
+        SELECT (select       count(*)
+        from
+        (
+        select 1 as d
+        union
+        select 2
+        union
+        select 3
+        union
+        select 4
+        union
+        select 5
+        union
+        select 6
+        union
+        select 7
+        ) weekdays
+        where d &lt;= (datediff(day, SRecruitmentStartDate, SRecruitmentEndDate)) % 7
+        and
+        datename(weekday, dateadd(day, -1, SRecruitmentEndDate))
+        in ('Saturday', 'Sunday')
+        ))
+
+        ELSE
+        (datediff(day, DATEADD(day,-1,SRecruitmentStartDate), SRecruitmentEndDate)) / 7 * 5 + (datediff(day, DATEADD(day,-1,SRecruitmentStartDate), SRecruitmentEndDate)) % 7 -
+        (
+        select       count(*)
+        from
+        (
+        select 1 as d
+        union
+        select 2
+        union
+        select 3
+        union
+        select 4
+        union
+        select 5
+        union
+        select 6
+        union
+        select 7
+        ) weekdays
+        where d &lt;= (datediff(day, DATEADD(day,-1,SRecruitmentStartDate), SRecruitmentEndDate)) % 7
+        and
+        datename(weekday, dateadd(day, -d, SRecruitmentEndDate))
+        in ('Saturday', 'Sunday')
+        )
+        END AS RecruitmentSpan,
+        VSA.RootEventID
+        FROM
+        @Studies VSA
+        INNER JOIN view_Studies VS ON VSA.RootEventID=VS.SREventID
+        WHERE
+        SANumber=0;
+
+
+        /** Get recruitment span between recruitment start date and today for selected studies */
+        DECLARE @RecruitmentSpantoDate TABLE
+        (
+        RecruitmentSpantoDate INT,
+        SREventID UNIQUEIDENTIFIER
+        )
+
+        INSERT INTO @RecruitmentSpantoDate (RecruitmentSpantoDate,SREventID)
+        SELECT
+        CASE WHEN datename(weekday, SRecruitmentStartDate)
+        in ('Sunday')
+        THEN
+        (datediff(day, SRecruitmentStartDate, GETDATE())) / 7 * 5 + (datediff(day, SRecruitmentStartDate, GETDATE())) % 7 -
+        (
+        SELECT (select       count(*)
+        from
+        (
+        select 1 as d
+        union
+        select 2
+        union
+        select 3
+        union
+        select 4
+        union
+        select 5
+        union
+        select 6
+        union
+        select 7
+        ) weekdays
+        where d &lt;= (datediff(day, SRecruitmentStartDate, GETDATE())) % 7
+        and
+        datename(weekday, dateadd(day, -1, GETDATE()))
+        in ('Saturday', 'Sunday')
+        ))
+
+        ELSE
+        (datediff(day, DATEADD(day,-1,SRecruitmentStartDate), GETDATE())) / 7 * 5 + (datediff(day, DATEADD(day,-1,SRecruitmentStartDate), GETDATE())) % 7 -
+        (
+        select       count(*)
+        from
+        (
+        select 1 as d
+        union
+        select 2
+        union
+        select 3
+        union
+        select 4
+        union
+        select 5
+        union
+        select 6
+        union
+        select 7
+        ) weekdays
+        where d &lt;= (datediff(day, DATEADD(day,-1,SRecruitmentStartDate), GETDATE())) % 7
+        and
+        datename(weekday, dateadd(day, -d, GETDATE()))
+        in ('Saturday', 'Sunday')
+        )
+        END AS RecruitmentSpan,
+        VSA.RootEventID
+        FROM
+        @Studies VSA
+        INNER JOIN view_Studies VS ON VSA.RootEventID=VS.SREventID
+        WHERE
+        SANumber=0;
+
+
+
+        SELECT
+        VS.SREventID,
+        VSA.SAREventID,
+        VS.SIdentifier,
+        VS.SName,
+        VSA.SANumber,
+        IDENTIFIER.REIIdentifier,
+        CONVERT(NVARCHAR(10),SRecruitmentStartDate,103 ) AS RecruitmentStart,
+        CONVERT(NVARCHAR(10),SRecruitmentEndDate,103 ) RecruitmentEnd,
+        (SELECT RecruitmentSpan FROM @RecruitmentSpan WHERE SREventID=VS.SREventID) as StudyDuration,
+        (SELECT RecruitmentSpantoDate FROM @RecruitmentSpantoDate WHERE SREventID=VS.SREventID) as StudyDurationTodate,
+        (SELECT RecruitmentTarget FROM @Fields WHERE RootID=VSC.RECERootID) AS RecruitmentTarget,
+        (SELECT Recruited FROM @Recruitment R WHERE R.SAREventID=VSA.SAREventID) AS Recruited,
+
+        CAST(CAST((SELECT RecruitmentTarget FROM @Fields WHERE RootID=VSC.RECERootID) as decimal(9,4))/
+        CAST((SELECT RecruitmentSpan FROM @RecruitmentSpan RS WHERE RS.SREventID=VSA.RootEventID) as decimal(9,4)) as decimal(9,4)) AS TargetperDay,
+
+        /** Number of Recruits / Recruitment Span */
+        CAST(CAST((SELECT Recruited FROM @Recruitment R WHERE R.SAREventID=VSA.SAREventID) as decimal(9,4))/nullif
+        (((SELECT RecruitmentSpantoDate FROM @RecruitmentSpantoDate WHERE SREventID=VS.SREventID)),0) as decimal(9,4)) AS RecruitedperDay,
+
+        /** (Number of Recruits / (Recruitment Span to date x Recruitment Target / Recruitment Span)) x 100 */
+        CASE WHEN ((SELECT RecruitmentSpantoDate FROM @RecruitmentSpantoDate WHERE SREventID=VS.SREventID)) &gt; ((SELECT RecruitmentSpan FROM @RecruitmentSpan WHERE SREventID=VS.SREventID))
+        THEN
+        CAST(((CAST((SELECT Recruited FROM @Recruitment R WHERE R.SAREventID=VSA.SAREventID) as decimal(9,2))/nullif
+        (CAST((SELECT RecruitmentTarget FROM @Fields WHERE RootID=VSC.RECERootID) as decimal(9,2)),0))*100) as decimal(9,2))
+        ELSE
+        CAST((CAST((SELECT Recruited FROM @Recruitment R WHERE R.SAREventID=VSA.SAREventID) as decimal(9,2))/nullif
+        (((CAST((SELECT RecruitmentSpantoDate FROM @RecruitmentSpantoDate WHERE SREventID=VS.SREventID) as decimal(9,2)))
+        *(CAST((SELECT RecruitmentTarget FROM @Fields WHERE RootID=VSC.RECERootID) as decimal(9,2)))
+        /(CAST((SELECT RecruitmentSpan FROM @RecruitmentSpan RS WHERE RS.SREventID=VSA.RootEventID)  as decimal(9,2)))),0))*100 as decimal(9,2))
+        END AS RecruitmentPerfomance,
+
+        /** Recruitment Target - Number of Recruits */
+        (SELECT RecruitmentTarget FROM @Fields WHERE RootID=VSC.RECERootID)-
+        (SELECT Recruited FROM @Recruitment R WHERE R.SAREventID=VSA.SAREventID) AS RemainToBeRecruited,
+
+        CAST(((CAST((SELECT Recruited FROM @Recruitment R WHERE R.SAREventID=VSA.SAREventID) as decimal(9,2)))/nullif
+        (CAST((SELECT RecruitmentTarget FROM @Fields WHERE RootID=VSC.RECERootID) as decimal(9,2)),0))*100 as decimal (9,2)) AS PercentageRecruited
+
+        FROM
+        WTCRFResourceEvents WRE
+        INNER JOIN view_StudyCores VSC ON VSC.ACREventID=WRE.REventID
+        INNER JOIN @Studies VSA ON VSA.SAREventID=VSC.RECEParentID
+        INNER JOIN view_Studies VS ON VSA.RootEventID=VS.SREventID
+        OUTER APPLY(SELECT REIIdentifier FROM view_ResourceEventIdentifiers VREI WHERE (VREI.REITypeID=@REITypeID) AND (VREI.REventID=VS.SREventID)) IDENTIFIER
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) VUR ON VUR.WAreaID=VSC.CAreaID
+        WHERE
+        SANumber=0
+        AND
+        VSC.CAreaID=40
+        ORDER BY
+        SIdentifier,
+        SName,
+        SANumber;
+
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Amendments">
+      <crf:statement>
+        SELECT
+        SREventID,
+        COUNT (VSA.SAREventID) AS AmendmentCount
+        FROM
+        view_StudyAmendments VSA
+        INNER JOIN @Studies VS ON VS.SAREventID=VSA.SAREventID
+        GROUP BY
+        SREventID;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="AdditionalFields">
+      <crf:statement>
+        SELECT
+        'Identifier' AS FieldType,
+        REITName AS FieldName
+        FROM
+        view_ResourceEventIdentifierTypes
+        WHERE
+        (REITypeID=@REITypeID);
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        CONVERT(NVARCHAR(12),@StartDate,106) AS FormattedStartDate,
+        CONVERT(NVARCHAR(12),@EndDate,106) AS FormattedEndDate;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+                    xmlns:crf-utils="crf:utilities" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Recruitment Performance</h1>
+          <div class="paragraph">
+            Studies with the recruitment start date on or after <xsl:value-of select="Configuration/FormattedStartDate" />
+            and before <xsl:value-of select="Configuration/FormattedEndDate" />.
+          </div>
+
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <tr>
+                <td>
+                  Study Identifier
+                </td>
+                <td>
+                  Study Name
+                </td>
+                <td>
+                  <xsl:value-of select="AdditionalFields[(FieldType='Identifier')]/FieldName"/>
+                </td>
+                <td>
+                  Recruitment Start Date
+                </td>
+                <td>
+                  Recruitment End Date
+                </td>
+                <td>
+                  Recruitment Duration
+                </td>
+                <td>
+                  Recruitment Duration to Date
+                </td>
+                <td>
+                  Recruitment Target
+                </td>
+                <td>
+                  Recruited to Date
+                </td>
+                <td>
+                  Percentage Recruited
+                </td>
+                <td>
+                  Remainder to be Recruited
+                </td>
+                <td>
+                  Target per Day
+                </td>
+                <td>
+                  Recruited per Day
+                </td>
+                <td>
+                  Recruitment Performance to Date or to End
+                </td>
+              </tr>
+            </thead>
+            <xsl:apply-templates select="Recruitment" />
+          </table>
+
+          <h2>
+            How is the data calculated?
+          </h2>
+          <div class="paragraph" style="font-weight: bold; color: #e60000;">
+            Note: All date calculations exclude weekends
+          </div>
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <tr>
+                <td>
+                  Field
+                </td>
+                <td>
+                  Calculation or Source
+                </td>
+              </tr>
+            </thead>
+            <tr>
+              <td>
+                Recruitment Start Date
+              </td>
+              <td>
+                On top level of study
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Recruitment End Date
+              </td>
+              <td>
+                On top level of study
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Recruitment Duration
+              </td>
+              <td>
+                Date difference between Recruitment Start Date and Recruitment End Date
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Recruitment Duration to Date
+              </td>
+              <td>
+                Date difference between Recruitment Start Date and current date. When the Recruitment Duration to Date is greater than the Recruitment Duration, the cell is highlighted in grey.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Recruitment Target
+              </td>
+              <td>
+                By default the value of the field "Target recruitment for CRF aspect of trial" on StudyDetail form (NIHRCRFTargetRecruit) is used - values for all amendments are summed.
+                Alternatively if the nursing clinical field option was checked: 
+                Value of field "Total no. of subjects" on Nursing Clinical form (Nursing Clinical Form: ANCTotalSubjects) is used - values for all amendments summed up (if the study has amendments the cell is highlighted in grey).
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Recruited to Date
+              </td>
+              <td>
+                Based on number of participants with a recruitment date (recruitment dates can be manually entered per patient or auto-generated by using the recruitment visit flag on visit types)
+              <br/>
+                Note: This counts any participants recruited to the study and does not currently take into consideration whether the participant was recruited within the recruitment span.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Percentage Recruited
+              </td>
+              <td>
+                (Number of Recruits / Recruitment Target) x 100
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Remainder to be Recruited
+              </td>
+              <td>
+                Recruitment Target minus Number of Recruits
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Target per Day
+              </td>
+              <td>
+                This requires that Recruitment Start Date and Recruitment End Date are both populated.
+                <br/>
+                Recruitment Target divided by Recruitment Duration
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Recruited per Day
+              </td>
+              <td>
+                Number of Recruits divided by Recruitment Duration to Date
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Recruitment Performance to Date or to End
+              </td>
+              <td>
+                This requires that Recruitment Start Date and Recruitment End Date are both populated.
+                <br/>
+                When "Recruitment Duration to Date" is greater than the "Recruitment Duration", i.e. recruitment ended:
+                <br/>
+                (Number of Recruits / Recruitment Target) x 100
+                <br/>
+                When "Recruitment Duration to Date" is lesser than the "Recruitment Duration", i.e. recruitment still open:
+                <br/>
+                (Number of Recruits / (Recruitment Span to date x Recruitment Target / Recruitment Span)) x 100
+              </td>
+            </tr>
+
+          </table>
+        </div>
+      </xsl:template>
+
+      <xsl:template match="Recruitment">
+        <tr>
+          <td>
+            <xsl:value-of select="SIdentifier"/>
+          </td>
+          <td>
+            <xsl:value-of select="SName"/>
+          </td>
+          <td>
+            <xsl:value-of select="REIIdentifier"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="RecruitmentStart"/>
+          </td>
+          <td>
+            <xsl:value-of select="RecruitmentEnd"/>
+          </td>
+          <td>
+            <xsl:value-of select="StudyDuration"/>
+          </td>
+          <td>
+            <xsl:if test="StudyDurationTodate>StudyDuration">
+              <xsl:attribute name="style">
+                background: #eaeaea;
+              </xsl:attribute>
+            </xsl:if>
+            <xsl:value-of select="StudyDurationTodate"/>
+          </td>
+          <td>
+            <xsl:if test="(/NewDataSet/Amendments[(./SREventID=current()/SREventID)]/AmendmentCount)>1">
+              <xsl:attribute name="style">
+                background: #eaeaea;
+              </xsl:attribute>
+            </xsl:if>
+            <xsl:value-of select="RecruitmentTarget"/>
+            </td>
+            <td>
+              <xsl:value-of select="Recruited"/>
+            </td>
+          <td>
+            <xsl:value-of select="PercentageRecruited"/>
+            <xsl:if test="PercentageRecruited">%</xsl:if>
+          </td>
+          <td>
+                <xsl:value-of select="RemainToBeRecruited"/>
+          </td>
+          <td>
+            <xsl:value-of select="TargetperDay"/>
+          </td>
+          <td>
+            <xsl:value-of select="RecruitedperDay"/>
+          </td>
+            <td>
+              <xsl:value-of select="RecruitmentPerfomance"/><xsl:if test="RecruitmentPerfomance">%</xsl:if>
+            </td>
+          </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

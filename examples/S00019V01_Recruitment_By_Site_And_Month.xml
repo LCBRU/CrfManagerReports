@@ -1,0 +1,328 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>S00019V01</crf:version>
+
+    <crf:analysis>Site Metrics</crf:analysis>
+    <crf:analysis>Recruitment</crf:analysis>
+    <crf:analysis></crf:analysis>
+
+    <crf:summary>Report daily recruitment by study, month and site</crf:summary>
+    <crf:notes>
+      Reports each participant with a recruitment date and location between the specified dates. 
+      Excludes any patients with a current status of "Not Recruited" (or equivalent) even if initially recruited. 
+    </crf:notes>
+    <crf:InternalNotes>
+    </crf:InternalNotes>
+  </crf:comment>
+  <crf:queryBatch>
+    <crf:query name="Setup">
+      <crf:searchOptions>
+        <crf:parameter name="StartDate" type="datetime" displayName="Recruited from the month">
+          <crf:parameter name="EndDate" type="datetime" displayName=" and before" />
+        </crf:parameter>
+        <crf:parameter name="SIdentifier" type="nvarchar" maxLength="40" useSearchConditions="true" displayName="and the study identifier or name" />
+        <crf:parameter name="SResourceID" type="nvarchar" maxLength="40" displayName="and the study type is" defaultText="Any">
+          <crf:query>
+            SELECT
+            ResourceID AS ValueField,
+            ResourceName AS TextField
+            FROM
+            view_Resources
+            WHERE
+            (ResourceTypeID=32)
+            ORDER BY
+            ResourceName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="SCTypeID" type="int" displayName="with a study contact of the type" defaultText="Select">
+          <crf:query>
+            SELECT
+            SCTypeID AS ValueField,
+            SCTName AS TextField
+            FROM
+            view_StudyContactTypes
+            WHERE
+            (SCTName &lt;&gt; 'Select')
+            ORDER BY
+            SCTName;
+          </crf:query>
+          <crf:parameter name="DisplayName" type="nvarchar" maxLength="40" useSearchConditions="true" displayName=" where the name" areaID="1003" autoCompleteName="Person"/>
+        </crf:parameter>
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @TimeSpanType NVARCHAR(50);
+        DECLARE @PSStatusID INT;
+        DECLARE @SCTypeID INT;
+        DECLARE @SIdentifier NVARCHAR(50);
+        DECLARE @DisplayName NVARCHAR(50);
+        DECLARE @ROwnerID UNIQUEIDENTIFIER;
+        DECLARE @SResourceID UNIQUEIDENTIFIER;
+
+        IF ( @ItemID IS NOT NULL )
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue VARCHAR(40)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StartDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='StartDate';
+        SELECT @EndDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='EndDate';
+        SELECT @TimeSpanType=FieldValue FROM @ViewParams WHERE FieldName='TimeSpanType';
+        SELECT @PSStatusID=CONVERT(INT,FieldValue) FROM @ViewParams WHERE FieldName='PSStatusID';
+        SELECT @SCTypeID=FieldValue FROM @ViewParams WHERE FieldName='SCTypeID';
+        SELECT @SIdentifier=FieldValue FROM @ViewParams WHERE FieldName='SIdentifier';
+        SELECT @DisplayName=FieldValue FROM @ViewParams WHERE FieldName='DisplayName';
+        SELECT @SResourceID=CONVERT(UNIQUEIDENTIFIER,FieldValue) FROM @ViewParams WHERE FieldName='SResourceID';
+        END
+
+        IF (@StartDate IS NULL) AND (@EndDate IS NULL)
+        BEGIN
+        EXEC get_TimeSpan @TimeSpanType,@StartDate OUTPUT,@EndDate OUTPUT;
+        END;
+
+
+        SELECT NULL;
+      </crf:statement>    
+  </crf:query>
+    <crf:query name="Days">
+      <crf:statement>
+        DECLARE @DayCount INT;
+
+        DECLARE @Now DATETIME;
+        SET @Now=CONVERT(DATETIME,CONVERT(NVARCHAR(11),GETDATE(),103),103);
+
+        /** Truncate end date */
+        SET @EndDate=CASE WHEN @EndDate &gt; DATEADD(day,1,@Now) THEN @Now ELSE @EndDate END;
+
+        /** Move start date to beginning of month */
+        SET @StartDate=DATEADD(day,-DATEPART(day,@StartDate)+1,@StartDate);
+
+        SET @DayCount=DATEDIFF(day,@StartDate,@EndDate);
+
+        DECLARE @Days TABLE
+        (
+        RecruitmentDay DATETIME
+        )
+
+        INSERT INTO @Days(RecruitmentDay)
+        SELECT
+        DATEADD(day,Number-1,@StartDate)
+        FROM
+        WTCRFNumberList
+        WHERE
+        (Number&lt;=@DayCount);
+
+        SELECT
+        DATENAME(month,RecruitmentDay) AS MonthName,
+        DATEPART(day,RecruitmentDay) AS DayNumber,
+        DATEPART(year,RecruitmentDay) AS YearNumber,
+        DATEPART(month,RecruitmentDay) AS MonthNumber,
+        CONVERT(NVARCHAR(10),RecruitmentDay,103) AS RecruitmentDay 
+        FROM 
+        @Days;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Months">
+      <crf:statement>
+        SELECT DISTINCT
+        DATEPART(month,RecruitmentDay) AS MonthNumber,
+        DATENAME(month,RecruitmentDay) AS MonthName,
+        DATEPART(year,RecruitmentDay) AS YearNumber
+        FROM
+        @Days
+        ORDER BY
+        YearNumber,
+        MonthNumber;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Recruitment">
+      <crf:statement>
+        DECLARE @Studies TABLE
+        (
+        SREventID UNIQUEIDENTIFIER PRIMARY KEY
+        )
+
+
+        INSERT INTO @Studies (SREventID)
+        SELECT
+        DISTINCT SREventID
+        FROM
+        view_Studies VS INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) VUR ON VUR.WAreaID=VS.REAreaID
+        LEFT OUTER JOIN view_StudyContacts VSC ON VS.SREventID=VSC.RECERootID
+        WHERE
+        (@SIdentifier IS NULL OR VS.SIdentifier LIKE @SIdentifier OR VS.SName LIKE @SIdentifier)
+        AND (@SCTypeID IS NULL OR VSC.SCTypeID=@SCTypeID)
+        AND (@DisplayName IS NULL OR VSC.DisplayName LIKE @DisplayName)
+        AND (@SResourceID IS NULL OR VS.ResourceID=@SResourceID);
+
+
+        SELECT
+        VPS.SREventID,
+        VPS.PSLocationEventID,
+        CONVERT(NVARCHAR(10),VPS.PSRecruitmentDate,103) AS PSRecruitmentDate,
+        DATEPART(year,VPS.PSRecruitmentDate) AS YearNumber,
+        DATEPART(month,VPS.PSRecruitmentDate) AS MonthNumber,
+        COUNT(1) AS TotalRecruited
+        FROM
+        view_PatientStudies VPS INNER JOIN @Studies S ON VPS.SREventID=S.SREventID
+        INNER JOIN view_ResourceEvents LOCATION ON LOCATION.REventID=VPS.PSLocationEventID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) VUR ON VUR.WAreaID=LOCATION.RAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) PATIENTRIGHTS ON VPS.RAreaID=PATIENTRIGHTS.WAreaID
+        WHERE
+        (VPS.PSSTSubTypeID&gt;-1)
+        AND (VPS.PSRecruitmentDate&gt;=@StartDate)
+        AND (VPS.PSRecruitmentDate&lt;@EndDate)
+        GROUP BY
+        VPS.SREventID,
+        VPS.PSLocationEventID,
+        DATEPART(year,VPS.PSRecruitmentDate),
+        DATEPART(month,VPS.PSRecruitmentDate),
+        CONVERT(NVARCHAR(10),VPS.PSRecruitmentDate,103);
+
+        SET @TotalRecords=@@ROWCOUNT;
+      </crf:statement>
+    </crf:query>    
+    <crf:query name="Locations">
+      <crf:statement>
+        SELECT
+        VPS.SREventID,
+        LOCATION.REventID,
+        VS.RESummary AS StudySummary,
+        COALESCE(LOCATION.ResourceName,'Unknown') AS LocationName
+        FROM
+        (SELECT DISTINCT VPS.SREventID,VPS.PSLocationEventID FROM view_PatientStudies VPS INNER JOIN @Studies S ON VPS.SREventID=S.SREventID WHERE (PSSTSubTypeID&gt;-1) AND (PSRecruitmentDate&gt;=@StartDate)
+        AND (PSRecruitmentDate&lt;@EndDate)) VPS LEFT OUTER JOIN view_ResourceEvents LOCATION ON VPS.PSLocationEventID=LOCATION.REventID
+        LEFT OUTER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) VUR ON VUR.WAreaID=LOCATION.RAreaID
+        INNER JOIN view_Studies VS ON VPS.SREventID=VS.SREventID
+        INNER JOIN @Studies S ON VS.SREventID=S.SREventID
+        WHERE
+        (VPS.PSLocationEventID IS NULL AND VUR.WAreaID IS NULL)
+        OR (VPS.PSLocationEventID IS NOT NULL AND VUR.WAreaID IS NOT NULL)
+        ORDER BY
+        VS.SIndex,
+        VS.RESummary,
+        LOCATION.ResourceName;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Recruitment</h1>
+          <table class="grid" cellpadding="0" cellspacing="0" style="border-style:none">
+            <xsl:apply-templates select="Months" />
+          </table>
+        </div>
+      </xsl:template>
+
+
+      <xsl:template match="Months">
+        <xsl:variable name="Month" select="."/>
+        <xsl:variable name="DayPadding" select="31-count(/NewDataSet/Days[(./MonthNumber=$Month/MonthNumber) and (./YearNumber=$Month/YearNumber)])"/>
+        <tr>
+          <td colspan="33" style="border-style : none">
+            <div style="font-size : 200%">
+              <xsl:value-of select="concat(MonthName,' ',YearNumber)" />
+            </div>
+          </td>
+        </tr>
+        <tr class="color_block_1">
+          <td>
+            <crf:areaScript areaID="305" name="PSStudyID" actionType="None" operation="View" />
+          </td>
+          <td>
+            <crf:areaScript areaID="305" name="PSLocationEventID" actionType="None" operation="View" />
+          </td>
+          <xsl:for-each select="/NewDataSet/Days[(./MonthNumber=$Month/MonthNumber) and (./YearNumber=$Month/YearNumber)]">
+            <td class="text_center">
+              <xsl:value-of select="DayNumber" />
+            </td>
+          </xsl:for-each>
+          <xsl:if test="$DayPadding&gt;0">
+            <td colspan="{$DayPadding}">
+              <br/>
+            </td>
+          </xsl:if>
+          <td class="text_right text_large">
+            Totals
+          </td>
+        </tr>
+        <xsl:for-each select="/NewDataSet/Locations">
+          <tr>
+            <td class="color_block_3">
+              <xsl:value-of select="StudySummary"/>
+            </td>
+            <td class="color_block_3">
+              <xsl:value-of select="LocationName"/>
+            </td>
+            <xsl:variable name="Location" select="."/>
+            <xsl:for-each select="/NewDataSet/Days[(./MonthNumber=$Month/MonthNumber) and (./YearNumber=$Month/YearNumber)]">
+              <xsl:variable name="Total" select="/NewDataSet/Recruitment[(./SREventID=$Location/SREventID) and (./PSLocationEventID=$Location/REventID) and (./PSRecruitmentDate=current()/RecruitmentDay)]/TotalRecruited"/>
+              <td class="text_center">
+                <xsl:if test="$Total&gt;0">
+                  <xsl:attribute name="style">
+                    background : #00dd00
+                  </xsl:attribute>                  
+                </xsl:if>
+
+                <xsl:if test="string-length($Total)&lt;1">
+                  0
+                </xsl:if>
+                <xsl:value-of select="$Total"/>
+              </td>
+            </xsl:for-each>
+            <xsl:if test="$DayPadding&gt;0">
+              <td colspan="{$DayPadding}" class="color_block_5">
+                <br/>
+              </td>
+            </xsl:if>
+            <td class="text_large text_right color_block_3">
+              <xsl:value-of select="sum(/NewDataSet/Recruitment[(./SREventID=$Location/SREventID) and (./PSLocationEventID=$Location/REventID) and (./MonthNumber=$Month/MonthNumber) and (./YearNumber=$Month/YearNumber)]/TotalRecruited)"/>
+            </td>
+          </tr>
+        </xsl:for-each>
+        <tr class="color_block_3 text_large">
+          <td colspan="2" class="text_right">
+            Totals
+          </td>
+          <xsl:for-each select="/NewDataSet/Days[(./MonthNumber=$Month/MonthNumber) and (./YearNumber=$Month/YearNumber)]">
+            <xsl:variable name="Total" select="sum(/NewDataSet/Recruitment[(./PSRecruitmentDate=current()/RecruitmentDay)]/TotalRecruited)"/>
+            <td class="text_center">
+              <xsl:if test="string-length($Total)&lt;1">
+                0
+              </xsl:if>
+              <xsl:value-of select="$Total"/>
+            </td>
+          </xsl:for-each>
+          <xsl:if test="$DayPadding&gt;0">
+            <td colspan="{$DayPadding}">
+              <br/>
+            </td>
+          </xsl:if>
+          <td class="text_right text_emphasis">
+            <xsl:value-of select="sum(/NewDataSet/Recruitment[(./MonthNumber=$Month/MonthNumber) and (./YearNumber=$Month/YearNumber)]/TotalRecruited)"/>
+          </td>
+        </tr>
+      </xsl:template>
+
+      
+      
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

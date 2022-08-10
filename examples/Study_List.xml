@@ -1,0 +1,313 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="Studies">
+      <crf:searchOptions>
+        <crf:parameter name="SIdentifier" type="nvarchar" maxLength="40" useSearchConditions="true" displayName="Where the study identifier or name" />
+
+        <crf:parameter name="StudyContactTypeID" type="int" displayName="and the study contact is" defaultText="Not selected">
+          <crf:query>
+            SELECT
+            WObjectID AS ValueField,
+            WObjName AS TextField
+            FROM
+            WTCRFObjects
+            WHERE
+            (WObjType=43)
+            ORDER BY
+            WObjName
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="Identifiers" type="nvarchar" displayName="and the identifier is" defaultText="Not selected">
+          <crf:query>
+            SELECT
+            REITypeID AS ValueField,
+            REITName AS TextField
+            FROM
+            view_ResourceEventIdentifierTypes
+            ORDER BY
+            REITName ASC
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="Identifiers2" type="nvarchar" displayName="and another identifier is" defaultText="Not selected">
+          <crf:query>
+            SELECT
+            REITypeID AS ValueField,
+            REITName AS TextField
+            FROM
+            view_ResourceEventIdentifierTypes
+            ORDER BY
+            REITName ASC
+          </crf:query>
+        </crf:parameter>
+       
+      </crf:searchOptions>
+
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @SIdentifier NVARCHAR(50);
+        DECLARE @StudyContactTypeID INT;
+        DECLARE @TimeSpanType NVARCHAR(11);
+        DECLARE @Identifiers UNIQUEIDENTIFIER;
+        DECLARE @Identifiers2 UNIQUEIDENTIFIER;
+
+        IF ( @ItemID IS NOT NULL )
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue VARCHAR(40)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StartDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='StartDate';
+        SELECT @EndDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='EndDate';
+        SELECT @SIdentifier=FieldValue FROM @ViewParams WHERE FieldName='SIdentifier';
+        SELECT @StudyContactTypeID=CONVERT(INT,FieldValue) FROM @ViewParams WHERE FieldName='StudyContactTypeID';
+        SELECT @Identifiers=FieldValue FROM @ViewParams WHERE FieldName='Identifiers';
+        SELECT @Identifiers2=FieldValue FROM @ViewParams WHERE FieldName='Identifiers2';
+        SELECT @TimeSpanType=FieldValue FROM @ViewParams WHERE FieldName='TimeSpanType';
+        END
+
+        IF (@StartDate IS NULL) AND (@EndDate IS NULL)
+        BEGIN
+        EXEC get_TimeSpan @TimeSpanType,@StartDate OUTPUT,@EndDate OUTPUT;
+        END;
+
+
+        IF (@EndDate&lt;@StartDate)
+        BEGIN
+        RETURN;
+        END;
+
+        DECLARE @Now DATETIME;
+        SET @Now=GETDATE();
+
+        SELECT
+
+
+        SIdentifier,
+        SName,
+        STitle,
+        SCTName,
+        SCTypeID,
+        DisplayName,
+        CONVERT(NVARCHAR(16),VSA.REStartDate,106) AS ActStartDate,
+        CONVERT(NVARCHAR(16),VSA.REEndDate,106) AS ActEndDate,
+        CONVERT(NVARCHAR(16),VSA.REEStartDate,106) AS EstStartDate,
+        CONVERT(NVARCHAR(16),VSA.REEEndDate,106) AS EstEndDate,
+        SAStatusName,
+        VREI.REIIdentifier AS FirstIdentifier,
+        OVREI.REIIdentifier AS SecondIdentifier,
+        VREI.REITypeID,
+        OVREI.REITypeID
+
+        FROM
+        view_StudyAmendments VSA
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) STUDYRIGHTS ON VSA.REAreaID=STUDYRIGHTS.WAreaID
+        LEFT OUTER JOIN view_StudyContacts VSC ON VSA.SREventID=VSC.RECERootID AND SCTypeID=@StudyContactTypeID
+        LEFT OUTER JOIN view_ResourceEventIdentifiers VREI ON VREI.REventID=VSA.SREventID AND VREI.REITypeID=@Identifiers
+        LEFT OUTER JOIN view_ResourceEventIdentifiers OVREI ON OVREI.REventID=VSA.SREventID AND OVREI.REITypeID=@Identifiers2
+
+
+        WHERE
+        (@StartDate IS NULL OR SCreationDate&gt;=@StartDate)
+        AND
+        (@EndDate IS NULL OR SCreationDate&lt;=@EndDate)
+        AND
+        ((@SIdentifier IS NULL) OR ((VSA.SIdentifier LIKE @SIdentifier) OR (VSA.SName LIKE @SIdentifier)))
+
+        ORDER BY
+        SName,
+        SIdentifier,
+        SCreationDate,
+        DisplayName,
+        STitle,
+        SStatusName;
+
+      </crf:statement>
+
+    </crf:query>
+    <crf:query name="StudyTypes">
+      <crf:statement>
+        SELECT
+        WObjectID,
+        WObjName
+        FROM
+        WTCRFObjects
+        WHERE
+        (WObjType=43)
+        ORDER BY
+        WObjName
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        RIGHT(CONVERT(NVARCHAR(12),@StartDate,106),8) AS FormattedStartDate,
+        RIGHT(CONVERT(NVARCHAR(12),@EndDate,106),8) AS FormattedEndDate,
+        (SELECT WobjName FROM WTCRFObjects WHERE WobjectID=@StudyContactTypeID) AS StudyContactType,
+        (SELECT REITName FROM view_ResourceEventIdentifierTypes WHERE REITypeID=@Identifiers) AS Identifier,
+        (SELECT REITName FROM view_ResourceEventIdentifierTypes WHERE REITypeID=@Identifiers2) AS Identifier2;
+
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Studies</h1>
+          <ul>
+            <li>Study amendments are listed as a separate study.</li>
+            <li>When there is more than one contact of the selected contact type on one study, the study will be listed for each contact.</li>
+            <li>When there is an Actual End date but the study is still Active, then this means that at least one core area of the study is complete while at least one other core area is still active. The Actual End date will be updated automatically when the other core area is completed as well.</li>
+          </ul>
+
+          <h2>
+            Number of studies:  <xsl:value-of select="count(/NewDataSet/Studies[(./SName)])" />
+          </h2>
+         
+          <table class="grid" cellpadding="2" cellspacing="0">
+
+            <thead>
+           
+              <tr>
+                <td>
+                  Study Identifier
+                </td>
+                <td>
+                  Study Name
+                </td>
+                <td>
+                  Full Title
+                </td>
+
+                <xsl:if test="/NewDataSet/Configuration/StudyContactType">
+                  <td>
+                    <xsl:value-of select="/NewDataSet/Configuration/StudyContactType" />
+                  </td>
+                </xsl:if>
+
+                <xsl:if test="/NewDataSet/Configuration/Identifier">
+                  <td>
+                    <xsl:value-of select="/NewDataSet/Configuration/Identifier" />
+                  </td>
+                </xsl:if>
+                <xsl:if test="/NewDataSet/Configuration/Identifier2">
+                  <td>
+                    <xsl:value-of select="/NewDataSet/Configuration/Identifier2" />
+                  </td>
+                </xsl:if>
+                <td>
+                  Estimated Start
+                </td>
+                <td>
+                  Estimated End
+                </td>
+                <td>
+                  Actual Start
+                </td>
+                <td>
+                  Actual End
+                </td>
+                <td>
+                  Status
+                </td>
+              </tr>
+            </thead>
+
+            <xsl:apply-templates select="Studies" />
+            <xsl:apply-templates select="FormatDate" />
+          </table>
+        </div>
+      </xsl:template>
+
+
+
+      <xsl:template match="Studies">
+
+        <tr>
+          <td>
+            <xsl:value-of select="SIdentifier" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="SName" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="STitle" />
+            <br/>
+          </td>
+          <xsl:if test="/NewDataSet/Configuration/StudyContactType">
+            <td>
+              <xsl:value-of select="DisplayName" />
+              <br/>
+            </td>
+          </xsl:if>
+          <xsl:if test="/NewDataSet/Configuration/Identifier">
+            <td>
+              <xsl:value-of select="FirstIdentifier" />
+            <br/>
+          </td>
+          </xsl:if>
+          <xsl:if test="/NewDataSet/Configuration/Identifier2">
+            <td>
+              <xsl:value-of select="SecondIdentifier" />
+              <br/>
+            </td>
+          </xsl:if>
+          <td>
+            <xsl:value-of select="EstStartDate"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="EstEndDate"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="ActStartDate"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="ActEndDate"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="SAStatusName" />
+            <br/>
+          </td>
+        </tr>
+
+      </xsl:template>
+
+
+      <xsl:template name="FormatDate">
+
+        <xsl:param name="DateTime" />
+        <xsl:variable name="date">
+          <xsl:value-of select="substring-before($DateTime,'T')" />
+        </xsl:variable>
+
+        <xsl:if test="string-length($date) != 10">
+          <xsl:value-of select="$DateTime"/>
+        </xsl:if>
+        <xsl:if test="string-length($date) = 10">
+          <xsl:value-of select="$date"/>
+        </xsl:if>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

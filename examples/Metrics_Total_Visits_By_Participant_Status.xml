@@ -1,0 +1,245 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="ParticipantStatusTypes">
+      <crf:searchOptions>
+        <crf:parameter name="StartMonth" type="int" displayName="Starting on the 1&lt;sup&gt;st&lt;/sup&gt; of">
+          <crf:query>
+            SET NOCOUNT ON;
+            DECLARE @Months TABLE
+            (
+            TextField NVARCHAR(10),
+            ValueField INT
+            )
+
+            INSERT INTO @Months (TextField,ValueField) VALUES ('January',1);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('February',2);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('March',3);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('April',4);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('May',5);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('June',6);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('July',7);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('August',8);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('September',9);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('October',10);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('November',11);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('December',12);
+
+            SELECT TextField,ValueField FROM @Months;
+          </crf:query>
+          <crf:parameter name="StartYear" type="int" displayName=" " maxLength="4" />
+        </crf:parameter>
+        <crf:parameter name="EndMonth" type="int" displayName="and ending before 1&lt;sup&gt;st&lt;/sup&gt; of">
+          <crf:query>
+            DECLARE @Months TABLE
+            (
+            TextField NVARCHAR(10),
+            ValueField INT
+            )
+
+            INSERT INTO @Months (TextField,ValueField) VALUES ('January',1);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('February',2);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('March',3);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('April',4);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('May',5);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('June',6);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('July',7);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('August',8);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('September',9);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('October',10);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('November',11);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('December',12);
+
+            SELECT TextField,ValueField FROM @Months;
+          </crf:query>
+          <crf:parameter name="EndYear" type="int" displayName=" " maxLength="4" />
+        </crf:parameter>
+        <crf:parameter name="ResourceOwners" type="nvarchar" displayName="and the visit was based at" defaultText="any Locations" multiSelect="true">
+          <crf:query>
+            SELECT
+            VR.ResourceID AS ValueField,
+            VR.RTName + ': ' + VR.ResourceName AS TextField
+            FROM
+            view_Resources VR INNER JOIN
+            (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) VUR ON VR.RAreaID=VUR.WAreaID
+            WHERE
+            ResourceID IN (SELECT ROwnerID FROM WTCRFResources)
+            AND (ResourceTypeID=1016)
+            ORDER BY
+            RTName,
+            ResourceName;
+          </crf:query>
+        </crf:parameter>
+		 <crf:parameter name="ParticipantStatusTypes" type="nvarchar" displayName="with the participant status" multiSelect="true">
+          <crf:query>
+            SELECT 
+			      PSSTName AS TextField,
+			      PSSTypeID AS ValueField 
+			      FROM
+			      view_PatientStudyStatusTypes;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StudySummary" type="nvarchar" displayName="and the study name or identifier" maxLength="50"  useSearchConditions="true"/>          
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @ResourceOwners NVARCHAR(MAX);
+        DECLARE @StudySummary NVARCHAR(500);
+	    	DECLARE @ParticipantStatusTypes NVARCHAR(500);
+
+        IF (@ItemID IS NOT NULL)
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(MAX),
+        FieldValue VARCHAR(MAX)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @ResourceOwners=FieldValue FROM @ViewParams WHERE FieldName='ResourceOwners';
+	    	SELECT @ParticipantStatusTypes=FieldValue FROM @ViewParams WHERE FieldName='ParticipantStatusTypes';
+        SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary';
+
+        SELECT @StartDate=CONVERT(DATETIME,'1/' + (SELECT CONVERT(VARCHAR(2),M.FieldValue)
+        FROM @ViewParams M WHERE M.FieldName='StartMonth') + '/' +
+        CONVERT(VARCHAR(4),Y.FieldValue),103 ) FROM @ViewParams Y WHERE FieldName='StartYear';
+
+        SELECT @EndDate=CONVERT(DATETIME,'1/' + (SELECT CONVERT(VARCHAR(2),M.FieldValue)
+        FROM @ViewParams M WHERE M.FieldName='EndMonth') + '/' +
+        CONVERT(VARCHAR(4),Y.FieldValue),103 ) FROM @ViewParams Y WHERE FieldName='EndYear';
+        END;
+
+        IF (@EndDate&lt;@StartDate)
+        BEGIN
+        RETURN;
+        END;
+
+
+        DECLARE @Owners TABLE
+        (
+        ROwnerID UNIQUEIDENTIFIER PRIMARY KEY
+        )
+
+        INSERT INTO @Owners(ROwnerID)
+        SELECT
+        ItemID
+        FROM
+        dbo.get_UniqueIdentifierTable(@ResourceOwners);
+		
+		    DECLARE @StatusTypes TABLE
+        (
+        PStatusID INT PRIMARY KEY
+        )
+
+        INSERT INTO @StatusTypes(PStatusID)
+        SELECT
+        ItemID
+        FROM
+        dbo.get_IntegerTable(@ParticipantStatusTypes);
+
+
+
+
+        SELECT
+        COUNT(VRE.REventID)AS PatientNumbers,
+        VRE_VT.RESummary AS VisitType,
+        VS.RESummary AS StudySummary,
+        CASE WHEN WO.WObjname IS NULL THEN 'Status not set' ELSE WO.WObjname END AS StatusName
+        FROM
+        view_ResourceEvents VRE INNER JOIN WTCRFResourceChildEvents WRCE ON VRE.REventID=WRCE.RECEChildID
+        INNER JOIN view_ResourceEvents VRE_A ON VRE_A.REventID=WRCE.RECEParentID
+        INNER JOIN WTCRFResourceChildEvents WRCE_Visit ON VRE_A.REventID=WRCE_Visit.RECEChildID
+        INNER JOIN view_ResourceChildEvents VRE_VT ON VRE_VT.REventID=WRCE_Visit.RECEParentID
+        INNER JOIN view_Studies VS ON WRCE.RECERootID=VS.SREventID
+	    	LEFT OUTER JOIN WTCRFPatientStudyEvents VPS ON VPS.PSEREventID=VRE.REventID
+	    	LEFT OUTER JOIN WTCRFObjects WO ON WO.WObjectID=VPS.PSEPSStatusID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) PATIENTRIGHTS ON VRE.RAreaID=PATIENTRIGHTS.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) STUDYRIGHTS ON VS.REAreaID=STUDYRIGHTS.WAreaID
+        WHERE
+        (VRE.ResourceTypeID=31) AND (VRE.RESTSubTypeID=5)
+        AND (VRE.TStartDate&gt;=@StartDate) AND (VRE.TStartDate&lt;@EndDate)
+        AND ((@ParticipantStatusTypes IS NULL) OR (VPS.PSEPSStatusID IS NULL) OR (VPS.PSEPSStatusID IN (SELECT PStatusID FROM @StatusTypes)))
+        AND (@ResourceOwners IS NULL OR VRE_A.ROwnerID IN (SELECT ROwnerID FROM @Owners))
+        AND (@StudySummary IS NULL OR VS.RESummary LIKE @StudySummary)
+        GROUP BY WO.WObjname,VRE_VT.RESummary,VS.RESummary
+        ORDER BY VRE_VT.RESummary,WO.WObjname;
+
+
+        SET @TotalRecords=@@ROWCOUNT;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        CONVERT(NVARCHAR(12),@StartDate,106) AS FormattedStartDate,
+        CONVERT(NVARCHAR(12),@EndDate,106) AS FormattedEndDate;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Total Visits By Type</h1>
+          <div class="paragraph">
+            Between <xsl:value-of select="Configuration/FormattedStartDate" /> and <xsl:value-of select="Configuration/FormattedEndDate" />.
+          </div>
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <tr>
+                <td>
+                  Study
+                </td>
+                <td>
+                  Visit Type Summary
+                </td>
+                <td>
+                  Patient Status
+                </td>
+                <td>
+                  No of complete visits
+                </td>
+              </tr>
+            </thead>
+            <xsl:apply-templates select="ParticipantStatusTypes" />
+            <tr class="dgfoot">
+              <td colspan="3">
+                Overall Total
+              </td>
+              <td>
+				<xsl:value-of select="sum(ParticipantStatusTypes/PatientNumbers)" />			
+              </td>
+            </tr>
+          </table>
+        </div>
+      </xsl:template>
+      <xsl:template match="ParticipantStatusTypes">
+        <tr>
+          <td>
+           <xsl:value-of select="StudySummary" />
+          </td>
+          <td>
+            <xsl:value-of select="VisitType" />
+          </td>
+          <td>
+            <xsl:value-of select="StatusName" />
+          </td>
+          <td>
+            <xsl:value-of select="PatientNumbers" />
+          </td>
+        </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

@@ -1,0 +1,298 @@
+﻿<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="ClinicalVisitTypes">
+      <crf:searchOptions>
+        <crf:parameter name="TimeSpanType" type="datespan" displayName="Covering the time period of" />
+        <crf:parameter name="StartDate" type="datetime" displayName="or starting on or after">
+          <crf:parameter name="EndDate" type="datetime" displayName=" and finishing before" />
+        </crf:parameter>
+        <crf:parameter name="REStatusID" type="int" displayName="where the booking status is" defaultText="any status">
+          <crf:query>
+            SELECT
+            REStatusTypeID AS ValueField,
+            RESTName AS TextField
+            FROM
+            view_ResourceEventStatusTypes
+            WHERE
+            (RESTSubTypeID NOT IN (0,9,10))
+            ORDER BY
+            RESTName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="SIdentifier" type="nvarchar" maxLength="40" useSearchConditions="true" displayName="and the study identifier or name" />
+        <crf:parameter name="ROwnerID" type="nvarchar" displayName="and the visit was based at" defaultText="any location">
+          <crf:query>
+            SELECT
+            ResourceID AS ValueField,
+            RTName + ': ' + ResourceName AS TextField
+            FROM
+            view_Resources VR INNER JOIN
+            (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) VUR ON VR.RAreaID=VUR.WAreaID
+            WHERE
+            (ResourceID IN (SELECT ROwnerID FROM WTCRFResources))
+            AND
+            (ResourceTypeID=1016)
+            ORDER BY
+            ResourceName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="VisitTypes" type="nvarchar" displayName="for visit types" defaultText="any visit type" multiSelect="true">
+          <crf:query>
+            SELECT
+            ResourceName AS TextField,
+            ResourceID AS ValueField
+            FROM
+            View_Resources
+            WHERE
+            (ResourceTypeID=2)
+            ORDER BY
+            ResourceName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="VisitSummary" type="nvarchar" maxLength="40" useSearchConditions="true" displayName="and the visit name contains" />
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @TimeSpanType NVARCHAR(50);
+        DECLARE @REStatusID INT;
+        DECLARE @SIdentifier NVARCHAR(50);
+        DECLARE @ROwnerID UNIQUEIDENTIFIER;
+        DECLARE @VisitTypeList NVARCHAR(MAX);
+        DECLARE @VisitSummary NVARCHAR(50);
+
+        DECLARE @VisitTypes TABLE
+        (
+        VisitTypeID UNIQUEIDENTIFIER
+        )
+
+        IF ( @ItemID IS NOT NULL )
+        BEGIN
+        IF EXISTS( SELECT * FROM WTCRFStateFields WHERE WSFStateID=@ItemID )
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue VARCHAR(MAX)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StartDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='StartDate';
+        SELECT @EndDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='EndDate';
+        SELECT @TimeSpanType=FieldValue FROM @ViewParams WHERE FieldName='TimeSpanType';
+        SELECT @REStatusID=CONVERT(INT,FieldValue) FROM @ViewParams WHERE FieldName='REStatusID';
+        SELECT @SIdentifier=FieldValue FROM @ViewParams WHERE FieldName='SIdentifier';
+        SELECT @ROwnerID=CONVERT(UNIQUEIDENTIFIER,FieldValue) FROM @ViewParams WHERE FieldName='ROwnerID';
+        SELECT @VisitTypeList=FieldValue FROM @ViewParams WHERE FieldName='VisitTypes';
+        SELECT @VisitSummary=FieldValue FROM @ViewParams WHERE FieldName='VisitSummary';
+
+        END
+        END
+
+        INSERT INTO @VisitTypes(VisitTypeID)
+        SELECT
+        ItemID
+        FROM
+        dbo.get_UniqueIdentifierTable(@VisitTypeList);
+
+        IF (@StartDate IS NULL) AND (@EndDate IS NULL)
+        BEGIN
+        EXEC get_TimeSpan @TimeSpanType,@StartDate OUTPUT,@EndDate OUTPUT;
+        END;
+
+        DECLARE @TotalEvents INT;
+
+        SET @TotalEvents=
+        (
+        SELECT
+        COUNT(VRE_Patient.RESTSubTypeID) AS TotalEvents
+        FROM
+        view_ResourceEvents VRE_Patient INNER JOIN WTCRFResourceChildEvents WRCE ON VRE_Patient.REventID = WRCE.RECEChildID
+        INNER JOIN view_ResourceEvents VRE ON WRCE.RECEParentID=VRE.REventID
+        INNER JOIN WTCRFResourceChildEvents WRCE_Accom ON WRCE_Accom.RECEChildID=VRE.REventID
+        INNER JOIN view_StudyAmendments VRE_Root ON VRE_Root.SREventID = WRCE.RECERootID
+        INNER JOIN view_ResourceEvents VRE_Parent ON VRE_Parent.REventID = WRCE_Accom.RECEParentID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) PATIENTRIGHTS ON VRE_Patient.RAreaID=PATIENTRIGHTS.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) STUDYRIGHTS ON VRE_Root.REAreaID=STUDYRIGHTS.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) LOCATIONRIGHTS ON VRE.RAreaID=LOCATIONRIGHTS.WAreaID
+        WHERE
+        (VRE_Patient.ResourceTypeID = 31)
+        AND (VRE_Parent.ResourceTypeID = 2)
+        AND (@VisitTypeList IS NULL OR VRE_Parent.ResourceID IN (SELECT VisitTypeID FROM @VisitTypes))
+        AND (@VisitSummary IS NULL OR VRE_Parent.RESummary LIKE @VisitSummary)
+        AND (@REStatusID IS NULL OR VRE_Patient.REStatusID=@REStatusID)
+        AND (VRE_Patient.TStartDate&gt;=@StartDate) AND (VRE_Patient.TStartDate&lt;@EndDate)
+        AND (@SIdentifier IS NULL OR VRE_Root.SIdentifier LIKE @SIdentifier OR VRE_Root.SName LIKE @SIdentifier)
+        AND (@ROwnerID IS NULL OR VRE.ROwnerID=@ROwnerID));
+
+
+        SELECT
+        VRE_Root.SIdentifier + COALESCE(': ' + VRE_Root.SName,'') AS Study,
+        VRE_Root.SREventID AS StudyID,
+        VRE_Parent.REName AS VisitName,
+        VRE_Parent.ResourceName AS VisitTypeName,
+        VRE_Patient.RESTName,
+        COUNT(VRE_Patient.RESTSubTypeID) AS EventCount,
+        @StartDate AS ReportStartDate,
+        @EndDate AS ReportEndDate
+        FROM
+        view_ResourceEvents VRE_Patient INNER JOIN WTCRFResourceChildEvents WRCE ON VRE_Patient.REventID = WRCE.RECEChildID
+        INNER JOIN view_ResourceEvents VRE ON WRCE.RECEParentID=VRE.REventID
+        INNER JOIN WTCRFResourceChildEvents WRCE_Accom ON WRCE_Accom.RECEChildID=VRE.REventID
+        INNER JOIN view_StudyAmendments VRE_Root ON VRE_Root.SREventID = WRCE.RECERootID
+        INNER JOIN view_ResourceEvents VRE_Parent ON VRE_Parent.REventID = WRCE_Accom.RECEParentID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) PATIENTRIGHTS ON VRE_Patient.RAreaID=PATIENTRIGHTS.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) STUDYRIGHTS ON VRE_Root.REAreaID=STUDYRIGHTS.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) LOCATIONRIGHTS ON VRE.RAreaID=LOCATIONRIGHTS.WAreaID
+        WHERE
+        (VRE_Patient.ResourceTypeID = 31)
+        AND (VRE_Parent.ResourceTypeID = 2)
+        AND (@VisitTypeList IS NULL OR VRE_Parent.ResourceID IN (SELECT VisitTypeID FROM @VisitTypes))
+        AND (@VisitSummary IS NULL OR VRE_Parent.RESummary LIKE @VisitSummary)
+        AND (@REStatusID IS NULL OR VRE_Patient.REStatusID=@REStatusID)
+        AND (VRE_Patient.TStartDate&gt;=@StartDate) AND (VRE_Patient.TStartDate&lt;@EndDate)
+        AND (@SIdentifier IS NULL OR VRE_Root.SIdentifier LIKE @SIdentifier OR VRE_Root.SName LIKE @SIdentifier)
+        AND (@ROwnerID IS NULL OR VRE.ROwnerID=@ROwnerID)
+        GROUP BY
+        VRE_Root.SIdentifier,
+        VRE_Root.SREventID,
+        VRE_Root.SName,
+        VRE_Parent.REName,
+        VRE_Parent.ResourceName,
+        VRE_Patient.RESTName
+        ORDER BY
+        VRE_Root.SIdentifier,
+        VRE_Parent.REName,
+        VRE_Patient.RESTName;
+        SET @TotalRecords=@@ROWCOUNT;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Totals">
+      <crf:statement>
+        SELECT @TotalEvents AS TotalEvents;        
+      </crf:statement>
+    </crf:query>
+    <crf:query name="StudyTotals">
+      <crf:statement>
+        SELECT
+        VRE_Root.SIdentifier + COALESCE(': ' + VRE_Root.SName,'') AS Study,
+        VRE_Root.SREventID AS StudyID,
+        COUNT(VRE_Patient.RESTSubTypeID) AS EventCountByStudy,
+        @StartDate AS ReportStartDate,
+        @EndDate AS ReportEndDate
+        FROM
+        view_ResourceEvents VRE_Patient INNER JOIN WTCRFResourceChildEvents WRCE ON VRE_Patient.REventID = WRCE.RECEChildID
+        INNER JOIN view_ResourceEvents VRE ON WRCE.RECEParentID=VRE.REventID
+        INNER JOIN WTCRFResourceChildEvents WRCE_Accom ON WRCE_Accom.RECEChildID=VRE.REventID
+        INNER JOIN view_StudyAmendments VRE_Root ON VRE_Root.SREventID = WRCE.RECERootID
+        INNER JOIN view_ResourceEvents VRE_Parent ON VRE_Parent.REventID = WRCE_Accom.RECEParentID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) PATIENTRIGHTS ON VRE_Patient.RAreaID=PATIENTRIGHTS.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) STUDYRIGHTS ON VRE_Root.REAreaID=STUDYRIGHTS.WAreaID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) LOCATIONRIGHTS ON VRE.RAreaID=LOCATIONRIGHTS.WAreaID
+        WHERE
+        (VRE_Patient.ResourceTypeID = 31)
+        AND (VRE_Parent.ResourceTypeID = 2)
+        AND (@VisitTypeList IS NULL OR VRE_Parent.ResourceID IN (SELECT VisitTypeID FROM @VisitTypes))
+        AND (@VisitSummary IS NULL OR VRE_Parent.RESummary LIKE @VisitSummary)
+        AND (@REStatusID IS NULL OR VRE_Patient.REStatusID=@REStatusID)
+        AND (VRE_Patient.TStartDate&gt;=@StartDate) AND (VRE_Patient.TStartDate&lt;@EndDate)
+        AND (@SIdentifier IS NULL OR VRE_Root.SIdentifier LIKE @SIdentifier OR VRE_Root.SName LIKE @SIdentifier)
+        AND (@ROwnerID IS NULL OR VRE.ROwnerID=@ROwnerID)
+        GROUP BY
+        VRE_Root.SIdentifier,
+        VRE_Root.SREventID,
+        VRE_Root.SName
+        ORDER BY
+        VRE_Root.SIdentifier
+      </crf:statement>
+    </crf:query>
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        CONVERT(NVARCHAR(12),@StartDate,106) AS FormattedStartDate,
+        CONVERT(NVARCHAR(12),@EndDate,106) AS FormattedEndDate;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="html" indent="yes" omit-xml-declaration="yes" />
+      <xsl:decimal-format name="sterling" NaN="" decimal-separator="." grouping-separator="," />
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Clinical Visit Bookings</h1>
+          <div class="paragraph">
+          This shows the quantity of individual clinical bookings starting on or after <xsl:value-of select="Configuration/FormattedStartDate" /> 
+          and before <xsl:value-of select="Configuration/FormattedEndDate" /> by study and by the status of booking for each clinical visit type.
+        </div>
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <tr>
+                <td>
+                Visit Type
+              </td>
+                <td>
+                Status
+              </td>
+                <td>
+                Total
+              </td>
+              </tr>
+            </thead>
+            <xsl:apply-templates select="ClinicalVisitTypes" />
+            <tr class="dgfoot">
+              <td colspan="2" align="right">
+              Total Bookings              
+            </td>
+              <td>
+                <xsl:value-of select="Totals/TotalEvents" />
+              </td>
+            </tr>
+          </table>
+        </div>
+      </xsl:template>
+      <xsl:template match="ClinicalVisitTypes">
+        <xsl:variable name="studyID" select="StudyID"/>
+        <xsl:if test="preceding-sibling::ClinicalVisitTypes[1]/Study!=Study or position()=1">
+          <tr>
+            <td colspan="3" class="section_head">
+              <xsl:value-of select="Study" />
+            </td>
+          </tr>
+        </xsl:if>
+        <tr>
+          <td>
+            <xsl:value-of select="VisitTypeName" /> - 
+            <xsl:value-of select="VisitName" /></td>
+          <td>
+            <xsl:value-of select="RESTName" />
+          </td>
+          <td>
+            <xsl:value-of select="EventCount" />
+          </td>
+        </tr>
+        <xsl:if test="following-sibling::ClinicalVisitTypes[1]/Study!=Study or position()=last()">
+          <tr>
+            <td colspan="2" align="right">
+              Study Total
+            </td>
+            <td>
+              <xsl:value-of select="/NewDataSet/StudyTotals[StudyID=$studyID]/EventCountByStudy"/>
+             </td>
+          </tr>
+        </xsl:if>
+      </xsl:template>
+
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

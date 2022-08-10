@@ -1,0 +1,1053 @@
+<?xml version="1.0" encoding="utf-8"?>
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+	<crf:comment>
+		<crf:version>S00038V01</crf:version>
+		<crf:analysis>Project Metrics</crf:analysis>
+		<crf:analysis>Flexible</crf:analysis>
+		<crf:analysis>NIHR</crf:analysis>
+		<crf:summary>
+			A flexible report that picks up any fields from study forms (Metrics and Nursing Clinical form) where the reference name contains “Metrics” or ”NIHR”.
+			It additionally offers an abundance of other fields. Most fields can be included/excluded via the filter options.
+		</crf:summary>
+		<crf:notes>
+			This report was created on the back of the NIHR Project Outputs and Intensity report. It is enabling users to pick fields in the filter to customise a report for their requirements.
+			The report picks up any fields from study forms (Metrics and Nursing Clinical form) where the reference name contains “Metrics” or ”NIHR”.
+			It offers multiselect filters for identifiers, approvals, study contacts.
+			The report also calculates "No. Recruited to date" by counting the number of recruitment dates for participants to date.
+			The report also calculates "No. Screened to date" by counting the number of completed screening visits (visits identified by using attribute type "Screening" on visit type).
+		</crf:notes>
+		<crf:InternalNotes>
+
+		</crf:InternalNotes>
+	</crf:comment>
+	<crf:queryBatch>
+		<crf:query name="Studies">
+			<crf:searchOptions>
+				<crf:parameter name="Note" type="nvarchar" displayName="&lt;strong&gt;Please consider running this report out of core hours as it might slow the system down for a few minutes.&lt;/strong&gt;" multiSelect="true">
+					<crf:query>
+						<br/>
+					</crf:query>
+				</crf:parameter>
+				<crf:parameter name="StudySummary" type="nvarchar" maxLength="30" useSearchConditions="true" displayName="Where the study identifier or name" />
+				<crf:parameter name="StartMonth" type="int" displayName="Required: Report on any studies that end after the 1&lt;sup&gt;st&lt;/sup&gt; of">
+					<crf:query>
+						SET NOCOUNT ON;
+						DECLARE @Months TABLE
+						(
+						TextField NVARCHAR(10),
+						ValueField INT
+						)
+
+						INSERT INTO @Months (TextField,ValueField) VALUES ('January',1);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('February',2);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('March',3);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('April',4);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('May',5);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('June',6);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('July',7);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('August',8);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('September',9);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('October',10);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('November',11);
+						INSERT INTO @Months (TextField,ValueField) VALUES ('December',12);
+
+						SELECT TextField,ValueField FROM @Months;
+					</crf:query>
+					<crf:parameter name="StartYear" type="int" displayName=" " maxLength="4"/>
+					<crf:parameter name="EndMonth" type="int" displayName=" and start before 1&lt;sup&gt;st&lt;/sup&gt; of">
+						<crf:query>
+							DECLARE @Months TABLE
+							(
+							TextField NVARCHAR(10),
+							ValueField INT
+							)
+
+							INSERT INTO @Months (TextField,ValueField) VALUES ('January',1);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('February',2);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('March',3);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('April',4);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('May',5);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('June',6);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('July',7);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('August',8);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('September',9);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('October',10);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('November',11);
+							INSERT INTO @Months (TextField,ValueField) VALUES ('December',12);
+
+							SELECT TextField,ValueField FROM @Months;
+						</crf:query>
+						<crf:parameter name="EndYear" type="int" displayName=" " maxLength="4"/>
+					</crf:parameter>
+				</crf:parameter>
+				<crf:parameter name="StatusList" type="nvarchar" displayName="and the study status is (leave unchecked to show all)" multiSelect="true" columns="2">
+					<crf:query>
+						SELECT
+						SAStatusID AS ValueField,
+						SAStatusName AS TextField
+						FROM
+						view_StudyAmendmentStatusTypes
+						ORDER BY
+						SAStatusName;
+					</crf:query>
+				</crf:parameter>
+				<crf:parameter name="PrimaryContactTypeID" type="nvarchar" displayName="The preferential contact is" multiSelect="true" columns="3">
+					<crf:query>
+						SELECT
+						SCTypeID AS ValueField,
+						SCTName AS TextField
+						FROM
+						view_StudyContactTypes
+						ORDER BY
+						SCTName;
+					</crf:query>
+				</crf:parameter>
+				<crf:parameter name="IntentifierTypeID" type="nvarchar" multiSelect="true" displayName="Include the following identifiers" columns="2">
+					<crf:query>
+						SELECT
+						REITypeID AS ValueField,
+						REITName AS TextField
+						FROM
+						WTCRFResourceEventIdentifierTypes;
+					</crf:query>
+				</crf:parameter>
+				<crf:parameter name="Approvals" type="nvarchar" displayName="Include the following approval types" multiSelect="true" columns="2">
+					<crf:query>
+						SELECT
+						ApprovalTypeID AS ValueField,
+						ApprovalName AS TextField
+						FROM
+						view_ApprovalTypes
+						WHERE
+						(ATAreaID=44)
+						ORDER BY
+						ApprovalName;
+					</crf:query>
+				</crf:parameter>
+				<crf:parameter name="NIHR" type="bit" displayName="NIHR site?" />
+				<crf:parameter name="PatientNumbers" type="bit" displayName="Include patient numbers and recruitment information?" />
+				<crf:parameter name="FormFields" type="nvarchar" displayName="Include the following fields" multiSelect="true" columns="2">
+					<crf:query>
+						SELECT
+						FAName,
+						FAContent AS TextField,
+						FieldID AS ValueField
+						FROM
+						view_Fields
+						WHERE
+						(FRootID='68F4BEBA-8483-43AF-A41E-862EA616C609')
+						AND (FContainerType&lt;&gt;'Row')
+						AND (FChildContainerType&lt;&gt;'TableHead')
+						AND ((FTypeID&lt;&gt;5)AND(FTypeID&lt;&gt;4))
+						AND ((FAName LIKE '%Metrics%') OR (FAName LIKE '%NIHR%'))
+						AND (FDeleted=0)
+						AND ((FAName NOT LIKE '%Interventional%')
+						AND (FAName NOT LIKE '%PrimaryIntervention%')
+						AND (FAName NOT LIKE '%SecondaryIntervention%')
+						AND (FAName NOT LIKE '%ResearchType%')
+						AND (FAName NOT LIKE '%StudyType%')
+						AND (FAName!='NIHR-SC-ClinicalNonClinical')
+						AND (FAName!='NIHROther')
+						AND (FAName!='NIHRTargetRecruit')
+						AND (FAName!='NIHRCRFTargetRecruit'))
+						ORDER BY
+						FIndex;
+					</crf:query>
+				</crf:parameter>
+			</crf:searchOptions>
+			<crf:statement>
+				SET NOCOUNT ON;
+
+				DECLARE @StudySummary NVARCHAR(500);
+				DECLARE @StartDate DATETIME;
+				DECLARE @EndDate DATETIME;
+				DECLARE @StatusList NVARCHAR(MAX);
+				DECLARE @PrimaryContactTypeID NVARCHAR(MAX);
+				DECLARE @FormFieldList NVARCHAR(MAX);
+				DECLARE @IntentifierTypeID NVARCHAR(MAX);
+				DECLARE @Approvals NVARCHAR(1000);
+				DECLARE @NIHR BIT;
+				DECLARE @PatientNumbers BIT;
+
+				DECLARE @FormFields TABLE
+				(
+				FormFieldID UNIQUEIDENTIFIER
+				)
+
+				IF (@ItemID IS NOT NULL)
+				BEGIN
+
+				DECLARE @ViewParams TABLE
+				(
+				FieldName NVARCHAR(MAX),
+				FieldValue NVARCHAR(MAX)
+				)
+
+				INSERT INTO @ViewParams
+				SELECT
+				WSFName,
+				WSFValue
+				FROM
+				WTCRFStateFields
+				WHERE
+				WSFStateID=@ItemID;
+
+				SELECT @StartDate=CONVERT(DATETIME,'1/' + (SELECT CONVERT(VARCHAR(2),M.FieldValue)
+				FROM @ViewParams M WHERE M.FieldName='StartMonth') + '/' +
+				CONVERT(VARCHAR(4),Y.FieldValue),103 ) FROM @ViewParams Y WHERE FieldName='StartYear';
+
+				SELECT @EndDate=CONVERT(DATETIME,'1/' + (SELECT CONVERT(VARCHAR(2),M.FieldValue)
+				FROM @ViewParams M WHERE M.FieldName='EndMonth') + '/' +
+				CONVERT(VARCHAR(4),Y.FieldValue),103 ) FROM @ViewParams Y WHERE FieldName='EndYear';
+
+				SELECT @StatusList=FieldValue FROM @ViewParams WHERE FieldName='StatusList';
+				SELECT @PrimaryContactTypeID=FieldValue FROM @ViewParams WHERE FieldName='PrimaryContactTypeID';
+				SELECT @FormFieldList=FieldValue FROM @ViewParams WHERE FieldName='FormFields';
+				SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary';
+				SELECT @IntentifierTypeID=FieldValue FROM @ViewParams WHERE FieldName='IntentifierTypeID';
+				SELECT @Approvals=FieldValue FROM @ViewParams WHERE FieldName='Approvals';
+				SELECT @NIHR=CONVERT( BIT,FieldValue ) FROM @ViewParams WHERE FieldName='NIHR';
+				SELECT @PatientNumbers=CONVERT( BIT,FieldValue ) FROM @ViewParams WHERE FieldName='PatientNumbers';
+
+				END;
+
+				INSERT INTO @FormFields(FormFieldID)
+				SELECT
+				ItemID
+				FROM
+				dbo.get_UniqueIdentifierTable(@FormFieldList);
+
+
+				DECLARE @Status TABLE
+				(
+				StatusID INT PRIMARY KEY
+				)
+
+				INSERT INTO @Status(StatusID)
+				SELECT
+				ItemID
+				FROM
+				dbo.get_IntegerTable(@StatusList);
+
+
+				DECLARE @StudyContacts TABLE
+				(
+				ContactID INT PRIMARY KEY,
+				ContactType NVARCHAR(MAX)
+				)
+
+				INSERT INTO @StudyContacts(ContactID,ContactType)
+				SELECT
+				ItemID,
+				SCTName
+				FROM
+				dbo.get_IntegerTable(@PrimaryContactTypeID) PCT
+				INNER JOIN view_StudyContactTypes VSCT ON VSCT.SCTypeID=PCT.ItemID;
+
+
+				DECLARE @Identifiers TABLE
+				(
+				Identifiers UNIQUEIDENTIFIER,
+				IdentifierName NVARCHAR(200)
+				)
+
+				INSERT INTO @Identifiers(Identifiers,IdentifierName)
+				SELECT
+				ItemID,
+				REITName
+				FROM
+				dbo.get_UniqueIdentifierTable(@IntentifierTypeID) UIT
+				INNER JOIN WTCRFResourceEventIdentifierTypes WREIT ON WREIT.REITypeID=UIT.ItemID;
+
+
+				DECLARE @ApprovalTypes TABLE
+				(
+				ApprovalTypeID INT PRIMARY KEY
+				)
+
+				INSERT INTO @ApprovalTypes(ApprovalTypeID)
+				SELECT
+				ItemID
+				FROM
+				dbo.get_IntegerTable(@Approvals);
+
+
+				IF (@EndDate&lt;@StartDate)
+				BEGIN
+				RETURN;
+				END;
+
+
+				DECLARE @Studies TABLE
+				(
+				Idx INT IDENTITY(1,1),
+				RootEventID UNIQUEIDENTIFIER NOT NULL,
+				SAREventID UNIQUEIDENTIFIER NOT NULL,
+				SANumber INT,
+				FunderCount INT DEFAULT 0
+				)
+
+
+				/** Get a subset of studies. */
+				INSERT INTO @Studies (RootEventID,SAREventID,SANumber,FunderCount)
+				SELECT
+				VSA.SREventID,
+				VSA.SAREventID,
+				VSA.SANumber,
+				(SELECT COUNT(1) FROM view_StudyFunding WHERE SAmendID=VSA.SAmendID AND SFSubTypeID=1)
+				FROM
+				view_StudyAmendments VSA
+				INNER JOIN M_Studies MS ON VSA.SREventID=MS.SREventID
+				INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) STUDY ON VSA.REAreaID=STUDY.WAreaID
+				WHERE
+				((@StudySummary IS NULL) OR ((VSA.SIdentifier LIKE @StudySummary) OR (VSA.SName LIKE @StudySummary)))
+				/** the actual start date has not been set */
+				AND ((REStartDate IS NULL)
+				/** the actual start date is before the last day of the reporting period */
+				OR ((REStartDate &lt; @EndDate)
+				/** the actual end date is after the first day of reporting period OR the study is either still open.*/
+				AND ((REEndDate &gt;= @StartDate) OR (REEndDate IS NULL))))
+				AND ((@StatusList IS NULL) OR (VSA.SAStatusID IN (SELECT StatusID FROM @Status)));
+
+
+				SELECT
+				VSA.SREventID,
+				VSA.SAREventID,
+				VSA.SResourceName,
+				VSA.SIdentifier,
+				VSA.SName,
+				VSA.SANumber,
+				VSA.SAName,
+				VSA.STitle,
+				VSA.SANotes,
+				VSA.SAStatusName,
+				VSA.SAStatusSubID,
+				CONVERT(NVARCHAR(12),VSA.REStartDate,106) AS REStartDate,
+				CONVERT(NVARCHAR(12),VSA.REEStartDate,106) AS REEStartDate,
+				CONVERT(NVARCHAR(12),VSA.REEndDate,106) AS REEndDate,
+				CONVERT(NVARCHAR(12),VSA.REEEndDate,106) AS REEEndDate,
+				CONVERT(NVARCHAR(12),VSA.SRecruitmentStartDate,106) AS RecruitmentStartDate,
+				CONVERT(NVARCHAR(12),VSA.SRecruitmentEndDate,106) AS RecruitmentEndDate,
+				VSA.SALive,
+				S.FunderCount,
+				(SELECT TOP 1 ContactName FROM view_StudyFunding WHERE (SAREventID=VSA.SAREventID) AND (SFSubTypeID=1) AND ((FunderCount=1) OR AFPrimary=1)) AS FunderName,
+				(SELECT TOP 1 FTypeName FROM view_StudyFunding WHERE (SAREventID=VSA.SAREventID) AND (SFSubTypeID=1) AND ((FunderCount=1) OR AFPrimary=1)) AS FunderCategory,
+				(SELECT TOP 1 CASE WHEN IntensityID IN (1,2) THEN 'Low' WHEN IntensityID IN (3,4) THEN 'Medium' WHEN IntensityID IN (5,6) THEN 'High' END
+				FROM view_StudyCores VSC WHERE VSC.CAreaID=40 AND VSC.RECEParentID=VSA.SAREventID) AS WTIntensity,
+				CASE WHEN @NIHR=1
+				THEN 1
+				ELSE 0 END AS NIHR,
+				CASE WHEN @PatientNumbers=1
+				THEN 1
+				ELSE 0 END AS PatientNumbers
+				FROM
+				view_StudyAmendments VSA INNER JOIN @Studies S ON VSA.SAREventID=S.SAREventID
+				ORDER BY
+				VSA.SIdentifier,
+				VSA.SName,
+				VSA.SANumber,
+				VSA.REStartDate,
+				SAStatusName;
+
+				SET @TotalRecords=@@ROWCOUNT;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="FinanceCategory">
+			<crf:statement>
+				SELECT
+				VSA.SREventID,
+				WO.wobjname
+				FROM
+				view_ResourceEventFinances VREF
+				INNER JOIN view_StudyAmendments VSA on VSA.SREventID=VREF.REFREventID
+				INNER JOIN WTCRFObjects WO ON WO.wobjectid=VREF.FCategoryID
+				INNER JOIN @Studies S ON S.RootEventID=VSA.SREventID
+				WHERE
+				FRelationType='Default';
+			</crf:statement>
+		</crf:query>
+		<crf:query name="Fields">
+			<crf:statement>
+				SELECT
+				FF.FormFieldID,
+				VF.FAContent,
+				VF.FAName
+				FROM
+				@FormFields FF INNER JOIN view_Fields VF ON VF.FieldID=FF.FormFieldID
+				ORDER BY FIndex;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="Identifier">
+			<crf:statement>
+				SELECT DISTINCT
+				S.RootEventID,
+				REIIdentifier,
+				REITName,
+				REventID
+				FROM
+				view_ResourceEventIdentifiers VREI
+				INNER JOIN @Studies S ON S.RootEventID=VREI.REventID
+				WHERE
+				(REITypeID IN (SELECT Identifiers FROM @Identifiers))
+				ORDER BY
+				REITName;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="IdentifierTypes">
+			<crf:statement>
+				SELECT
+				IdentifierName
+				FROM
+				@Identifiers
+				ORDER BY
+				IdentifierName;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="ContactTypes">
+			<crf:statement>
+				SELECT
+				ContactID,
+				ContactType
+				FROM
+				@StudyContacts
+				ORDER BY
+				ContactType;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="Contacts">
+			<crf:statement>
+
+				DECLARE @Contacts TABLE
+				(
+				RECEParentID UNIQUEIDENTIFIER,
+				DisplayName NVARCHAR(200),
+				SCTName NVARCHAR(200),
+				SCTypeID INT,
+				StartDate DATETIME,
+				EndDate DATETIME
+				)
+
+				INSERT INTO @Contacts (RECEParentID,DisplayName,SCTName,SCTypeID,StartDate,EndDate)
+				SELECT
+				WRCE.RECEParentID,
+				VC.DisplayName,
+				VSCT.SCTName,
+				VSCT.SCTypeID,
+				REEStartDate,
+				REEEndDate
+				FROM
+				M_AppContact MAC INNER JOIN view_StudyContactTypes VSCT ON MAC.ACContactTypeID=VSCT.SCTypeID
+				INNER JOIN WTCRFResourceChildEvents WRCE ON MAC.ACREventID=WRCE.RECEChildID
+				INNER JOIN WTCRFResourceEvents WRE ON WRE.REventID=MAC.ACREventID
+				INNER JOIN view_Contacts VC ON VC.CResourceID=WRE.REResourceID
+				INNER JOIN (SELECT DISTINCT SAREventID FROM @Studies) S ON WRCE.RECEParentID=S.SAREventID
+				WHERE WRE.REDeleted=0
+				AND
+				(VSCT.SCTypeID IN (SELECT ContactID FROM @StudyContacts));
+
+				<!-- Query ensures that only top 1 contact is returned where there is two or more contacts of the same contact type on the same study -->
+
+				SELECT
+				RECEParentID,DisplayName,SCTName,SCTypeID
+				FROM @Contacts C
+				<!-- Enable filter below to filter by study contact Involved From and To dates
+        WHERE
+        (StartDate IS NULL OR StartDate &lt; GETDATE()) AND (EndDate IS NULL OR EndDate &gt; GETDATE()) -->
+				ORDER BY DisplayName
+			</crf:statement>
+		</crf:query>
+		<crf:query name="RootContacts">
+			<crf:statement>
+				DECLARE @RootContacts TABLE
+				(
+				RECERootID UNIQUEIDENTIFIER,
+				DisplayName NVARCHAR(200),
+				SCTName NVARCHAR(200),
+				SCTypeID INT,
+				StartDate DATETIME,
+				EndDate DATETIME
+				)
+
+				INSERT INTO @RootContacts (RECERootID,DisplayName,SCTName,SCTypeID,StartDate,EndDate)
+				SELECT
+				WRCE.RECERootID,
+				VC.DisplayName,
+				VSCT.SCTName,
+				VSCT.SCTypeID,
+				REEStartDate,
+				REEEndDate
+				FROM
+				M_AppContact MAC INNER JOIN view_StudyContactTypes VSCT ON MAC.ACContactTypeID=VSCT.SCTypeID
+				INNER JOIN WTCRFResourceChildEvents WRCE ON MAC.ACREventID=WRCE.RECEChildID
+				INNER JOIN WTCRFResourceEvents WRE ON WRE.REventID=MAC.ACREventID
+				INNER JOIN view_Contacts VC ON VC.CResourceID=WRE.REResourceID
+				INNER JOIN (SELECT DISTINCT RootEventID FROM @Studies) S ON WRCE.RECEParentID=S.RootEventID
+				WHERE WRE.REDeleted=0
+				AND
+				(VSCT.SCTypeID IN (SELECT ContactID FROM @StudyContacts));
+
+				<!-- Query ensures that only top 1 contact is returned where there is two or more contacts of the same contact type on the same study -->
+
+				SELECT
+				RECERootID,DisplayName,SCTName,SCTypeID
+				FROM @RootContacts RC
+				<!-- Enable filter below to filter by study contact Involved From and To dates
+        WHERE
+        (StartDate IS NULL OR StartDate &lt; GETDATE()) AND (EndDate IS NULL OR EndDate &gt; GETDATE()) -->
+				ORDER BY DisplayName;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="Recruitment">
+			<crf:statement>
+				SELECT
+				VPS.SREventID,
+				COUNT(PSRecruitmentDate) AS Recruited
+				FROM
+				view_PatientStudies VPS
+				INNER JOIN @Studies S ON S.RootEventID=VPS.SREventID
+				WHERE
+				PSRecruitmentDate IS NOT NULL
+				AND
+				S.SANumber=0
+				GROUP BY
+				VPS.SREventID
+			</crf:statement>
+		</crf:query>
+		<crf:query name="Screened">
+			<crf:statement>
+				SELECT
+				VPE.SREventID,
+				COUNT(VPE.REventID) AS Screened
+				FROM
+				view_Attributes VA
+				INNER JOIN WTCRFResources WR ON WR.ResourceID=VA.AOwnerID
+				INNER JOIN WTCRFResourceEvents WRE ON WRE.REResourceID=WR.ResourceID
+				INNER JOIN view_PatientEvents VPE ON VPE.VisitTypeEventID=WRE.REventID
+				INNER JOIN @Studies S ON S.RootEventID=VPE.SREventID
+				WHERE
+				ATInternalRef='Screening'
+				AND
+				VPE.RESTSubTypeID=5
+				AND
+				S.SANumber=0
+				GROUP BY
+				VPE.SREventID;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="ApprovalTypes">
+			<crf:statement>
+				SELECT
+				VAT.ApprovalTypeID,
+				VAT.ApprovalName
+				FROM
+				view_ApprovalTypes VAT INNER JOIN @ApprovalTypes AT ON VAT.ApprovalTypeID=AT.ApprovalTypeID
+				ORDER BY
+				ApprovalName;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="Approvals">
+			<crf:statement>
+				SELECT
+				VSA.SAREventID,
+				VREA.ApprovalTypeID,
+				VREA.ApprovalName,
+				CASE WHEN ATStatusSubTypeID=-1
+				THEN ''
+				ELSE VREA.ATStatusName
+				END AS ATStatusName,
+				CONVERT(NVARCHAR(12),VREA.REAApprovedDate,106) AS REAApprovedDate
+				FROM
+				view_ResourceEventApprovals VREA INNER JOIN @ApprovalTypes AT ON VREA.ApprovalTypeID=AT.ApprovalTypeID
+				INNER JOIN view_StudyAmendments VSA ON VREA.REventID=VSA.SAREventID
+				INNER JOIN @Studies S ON VSA.SAREventID=S.SAREventID
+				ORDER BY
+				VREA.ApprovalName;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="Responses">
+			<crf:statement>
+				SELECT
+				VF.FSourceID,
+				VF.FAContent,
+				VF.FieldID,
+				VF.FAName,
+				VR.RInteger,
+				VR.RFreeText,
+				VR.RDecimal,
+				VR.RMoney,
+				VR.RDateTime,
+				CASE WHEN (WO.WObjectID IS NOT NULL) AND (WO.WODefault&lt;&gt;1) THEN WO.WObjName
+				WHEN (VR.RFreeText IS NOT NULL) THEN VR.RFreeText
+				WHEN (VR.RInteger IS NOT NULL) THEN CONVERT(NVARCHAR,VR.RInteger)
+				WHEN (VR.RDecimal IS NOT NULL) THEN CONVERT(NVARCHAR,VR.RDecimal)
+				WHEN (VR.RDateTime IS NOT NULL) THEN CONVERT(NVARCHAR(12),VR.RDateTime,106)
+				ELSE
+				' '
+				END AS ROptionID,
+				WRE.REventID
+				FROM
+				view_Fields VF INNER JOIN WTCRFResourceEvents WRE ON VF.FRootID=WRE.REFieldID
+				INNER JOIN @Studies S ON WRE.REventID=S.SAREventID
+				LEFT OUTER JOIN view_Responses VR ON VF.FieldID=VR.FieldID
+				LEFT OUTER JOIN WTCRFObjects WO ON WO.WObjectID=VR.ROptionID
+				WHERE
+				((VR.RStatusID) IS NULL OR (VR.RStatusID=1))
+				ORDER BY FIndex;
+			</crf:statement>
+		</crf:query>
+		<crf:query name="CoreResponses">
+			<crf:statement>
+				SELECT DISTINCT
+				VR.RInteger,
+				VSC.RECEParentID
+				FROM
+				view_Fields VF INNER JOIN WTCRFResourceEvents WRE ON VF.FRootID=WRE.REFieldID
+				INNER JOIN view_StudyCores VSC ON VSC.ACREventID=WRE.REventID
+				INNER JOIN @Studies S ON VSC.RECEParentID=S.SAREventID
+				LEFT OUTER JOIN view_Responses VR ON VF.FieldID=VR.FieldID
+				WHERE
+				((VR.RStatusID) IS NULL OR (VR.RStatusID=1))
+				AND
+				(FAName='Nursing Clinical Form: ANCTotalSubjects');
+			</crf:statement>
+		</crf:query>
+		<crf:query name="Configuration">
+			<crf:statement>
+				SELECT
+				CONVERT(NVARCHAR(12),@StartDate,106) AS FormattedStartDate,
+				CONVERT(NVARCHAR(12),@EndDate,106) AS FormattedEndDate;
+			</crf:statement>
+		</crf:query>
+	</crf:queryBatch>
+	<crf:body id="1" title="Print format" format="text/xml">
+		<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:crf-utils="crf:utilities" version="1.0">
+			<xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+			<!-- How savage! -->
+			<xsl:template name="insertLineBreaks">
+				<xsl:param name="textValue"/>
+				<xsl:choose>
+					<xsl:when test="contains($textValue, '&#xA;')">
+						<xsl:value-of select="substring-before($textValue,'&#xA;')"/>
+						<br />
+						<xsl:call-template name="insertLineBreaks">
+							<xsl:with-param name="textValue"
+								 select="substring-after($textValue,'&#xA;')"/>
+						</xsl:call-template>
+					</xsl:when>
+					<xsl:otherwise>
+						<xsl:value-of select="$textValue"/>
+					</xsl:otherwise>
+				</xsl:choose>
+			</xsl:template>
+
+			<xsl:template match="NewDataSet">
+				<div>
+					<h1>Flexible Metrics</h1>
+					<div class="paragraph">
+						Studies that start after
+						<xsl:choose>
+							<xsl:when test="(Configuration/FormattedStartDate)">
+								<xsl:value-of select="Configuration/FormattedStartDate" />
+							</xsl:when>
+							<xsl:otherwise>
+								<span class="text_center text_italic text_disabled">
+									No start date set
+								</span>
+							</xsl:otherwise>
+						</xsl:choose>
+						and before <xsl:choose>
+							<xsl:when test="(Configuration/FormattedEndDate)">
+								<xsl:value-of select="Configuration/FormattedEndDate" />.
+							</xsl:when>
+							<xsl:otherwise>
+								<span class="text_center text_italic text_disabled">
+									No end date set.
+								</span>
+							</xsl:otherwise>
+						</xsl:choose>
+					</div>
+					<xsl:if test="(/NewDataSet/Studies/PatientNumbers)=1">
+						<ul>
+							<li>
+								Any studies without an actual start or end date will be returned by the report plus any studies that match the date filters.
+							</li>
+							<li>
+								"No. Recruited to date" is calculated by counting the number of recruitment dates for participants to date. When there are amendments to the study, the recruitment numbers are summed up.
+							</li>
+							<li>
+								"No. Screened to date" is calculated by counting the number of completed screening visits (visits identified by using attribute type "Screening" on visit type). Get in touch with support@crfmanager.com if you need help to set this up.
+							</li>
+						</ul>
+					</xsl:if>
+					<table class="grid" cellpadding="3" cellspacing="0">
+						<thead>
+							<tr>
+								<td>
+									<xsl:value-of select="crf-utils:Label(31,'SIdentifier',1)"/>
+								</td>
+								<td>
+									<xsl:value-of select="crf-utils:Label(31,'SName',1)"/>
+								</td>
+								<td>
+									Study Amendment
+								</td>
+								<td>
+									<xsl:value-of select="crf-utils:Label(31,'STitle',1)"/>
+								</td>
+								<td>
+									<xsl:value-of select="crf-utils:Label(31,'ResourceID',1)"/>
+								</td>
+								<td>
+									<xsl:value-of select="crf-utils:Label(31,'FCategoryID',1)"/>
+								</td>
+								<xsl:for-each select="/NewDataSet/IdentifierTypes">
+									<td>
+										<xsl:value-of select="IdentifierName" />
+									</td>
+								</xsl:for-each>
+								<xsl:for-each select="/NewDataSet/ApprovalTypes">
+									<td>
+										<xsl:value-of select="ApprovalName" />
+									</td>
+									<td>
+										<xsl:value-of select="ApprovalName" /> - Date Approved
+									</td>
+								</xsl:for-each>
+								<xsl:for-each select="/NewDataSet/ContactTypes">
+									<td>
+										<xsl:value-of select="ContactType" />
+									</td>
+								</xsl:for-each>
+								<td class="col_nowrap">
+									<xsl:value-of select="crf-utils:Label(44,'REStartDate',1)"/>
+								</td>
+								<td class="col_nowrap">
+									<xsl:value-of select="crf-utils:Label(44,'REEndDate',1)"/>
+								</td>
+								<td>
+									<xsl:value-of select="crf-utils:Label(44,'SAStatusID',1)"/>
+								</td>
+								<xsl:if test="(/NewDataSet/Studies/PatientNumbers)=1">
+									<td>
+										Recruitment start date
+									</td>
+									<td>
+										Recruitment end date
+									</td>
+									<td>
+										Target recruitment for trial
+									</td>
+									<td>
+										Target recruitment for CRF aspect of trial
+									</td>
+									<td>
+										No. Recruited to date
+									</td>
+									<td>
+										No. Screened to date
+									</td>
+								</xsl:if>
+								<xsl:if test="/NewDataSet/Studies/NIHR=1">
+									<td>
+										Is REC approval Required?
+									</td>
+									<td>
+										Research Type
+									</td>
+									<td>
+										Project Type
+									</td>
+									<td>
+										"Primary Intervention" / or Area
+									</td>
+									<td>
+										If selected 'Other' please clarify further.
+									</td>
+								</xsl:if>
+								<td>
+									Intensity of Study
+								</td>
+								<xsl:for-each select="/NewDataSet/Fields[not(./FAName='NIHR-SC-SecondaryIntervention')and not(./FAName='NIHRTargetRecruit')and not(./FAName='NIHRCRFTargetRecruit')]">
+									<td>
+										<xsl:value-of select="FAContent"/>
+									</td>
+								</xsl:for-each>
+							</tr>
+						</thead>
+						<xsl:apply-templates select="Studies" />
+					</table>
+				</div>
+			</xsl:template>
+			<xsl:template match="Studies">
+				<xsl:variable name="Study" select="."/>
+				<xsl:variable name="selectedField" select="/NewDataSet/Fields/FAName"/>
+				<xsl:variable name="IdentifierName">
+					<xsl:for-each select="/NewDataSet/IdentifierTypes">
+						<td>
+							<xsl:value-of select="IdentifierName"/>
+						</td>
+					</xsl:for-each>
+				</xsl:variable>
+				<tr onmouseover="$(this).addClass('recordhighlight');"
+					onmouseout="$(this).removeClass('recordhighlight');">
+					<td>
+						<xsl:value-of select="SIdentifier" />
+					</td>
+					<td>
+						<xsl:value-of select="SName" />
+					</td>
+					<xsl:choose>
+						<xsl:when test="SANumber>0">
+							<td>
+								Amendment <xsl:value-of select="SANumber"/>: <xsl:value-of select="SAName"/>
+							</td>
+						</xsl:when>
+						<xsl:otherwise>
+							<td>
+								<br/>
+							</td>
+						</xsl:otherwise>
+					</xsl:choose>
+					<td>
+						<div>
+							<xsl:call-template name="insertLineBreaks">
+								<xsl:with-param name="textValue" select="STitle"/>
+							</xsl:call-template>
+						</div>
+					</td>
+					<td>
+						<xsl:value-of select="SResourceName" />
+					</td>
+					<td>
+						<xsl:value-of select="/NewDataSet/FinanceCategory[(./SREventID=current()/SREventID)]/wobjname" />
+					</td>
+					<xsl:if test="/NewDataSet/IdentifierTypes">
+						<xsl:for-each select="/NewDataSet/IdentifierTypes">
+							<xsl:choose>
+								<xsl:when test="/NewDataSet/Identifier[(./REventID=$Study/SREventID) and (./REITName=current()/IdentifierName)]">
+									<xsl:for-each select="/NewDataSet/Identifier[(./REventID=$Study/SREventID) and (./REITName=current()/IdentifierName)]">
+										<td>
+											<xsl:value-of select="REIIdentifier"/>
+											<br/>
+										</td>
+									</xsl:for-each>
+								</xsl:when>
+								<xsl:otherwise>
+									<td>
+										<br/>
+									</td>
+								</xsl:otherwise>
+							</xsl:choose>
+						</xsl:for-each>
+					</xsl:if>
+
+					<xsl:if test="/NewDataSet/ApprovalTypes">
+						<xsl:for-each select="/NewDataSet/ApprovalTypes">
+							<xsl:choose>
+								<xsl:when test="/NewDataSet/Approvals[(./SAREventID=$Study/SAREventID) and (./ApprovalTypeID=current()/ApprovalTypeID)]">
+									<xsl:for-each select="/NewDataSet/Approvals[(./SAREventID=$Study/SAREventID) and (./ApprovalTypeID=current()/ApprovalTypeID)]">
+										<td>
+											<xsl:value-of select="ATStatusName"/>
+											<br/>
+										</td>
+										<td>
+											<xsl:value-of select="REAApprovedDate"/>
+											<br/>
+										</td>
+									</xsl:for-each>
+								</xsl:when>
+								<xsl:otherwise>
+									<td>
+										<br/>
+									</td>
+									<td>
+										<br/>
+									</td>
+								</xsl:otherwise>
+							</xsl:choose>
+						</xsl:for-each>
+					</xsl:if>
+
+					<!-- Prioritise contacts added on the study details level. If no contact is added at this level it will look at the root People and Other contacts list -->
+
+					<xsl:if test="/NewDataSet/ContactTypes">
+						<xsl:for-each select="/NewDataSet/ContactTypes">
+							<xsl:choose>
+								<xsl:when test="/NewDataSet/Contacts[(./RECEParentID=$Study/SAREventID) and (./SCTypeID=current()/ContactID)]">
+									<td>
+										<xsl:for-each select="/NewDataSet/Contacts[(./RECEParentID=$Study/SAREventID) and (./SCTypeID=current()/ContactID)]">
+											<xsl:value-of select="DisplayName"/>
+											<br/>
+										</xsl:for-each>
+									</td>
+								</xsl:when>
+								<xsl:when test="/NewDataSet/RootContacts[(./RECERootID=$Study/SREventID) and (./SCTypeID=current()/ContactID)]">
+
+									<td>
+										<xsl:for-each select="/NewDataSet/RootContacts[(./RECERootID=$Study/SREventID) and (./SCTypeID=current()/ContactID)]">
+											<xsl:value-of select="DisplayName" />
+											<br/>
+										</xsl:for-each>
+									</td>
+
+								</xsl:when>
+								<xsl:otherwise>
+									<td>
+										<br/>
+									</td>
+								</xsl:otherwise>
+							</xsl:choose>
+						</xsl:for-each>
+					</xsl:if>
+
+					<td class="col_nowrap" >
+						<xsl:choose>
+							<xsl:when test="REStartDate">
+								<xsl:value-of select="REStartDate" />
+							</xsl:when>
+							<xsl:when test="REEStartDate">
+								Estimated: <xsl:value-of select="REEStartDate" />
+							</xsl:when>
+							<xsl:otherwise>
+								<span style="color: #ff0000; font-weight: bold;" >
+									Set actual start date
+								</span>
+							</xsl:otherwise>
+						</xsl:choose>
+					</td>
+					<td class="col_nowrap" >
+						<xsl:choose>
+							<xsl:when test="REEndDate">
+								<xsl:value-of select="REEndDate" />
+							</xsl:when>
+							<xsl:when test="REEEndDate">
+								Estimated: <xsl:value-of select="REEEndDate" />
+							</xsl:when>
+							<xsl:otherwise>
+								<span style="color: #ff0000; font-weight: bold;" >
+									Set actual or estimated end date
+								</span>
+							</xsl:otherwise>
+						</xsl:choose>
+					</td>
+					<td>
+						<xsl:value-of select="SAStatusName" />
+					</td>
+
+					<xsl:if test="PatientNumbers=1">
+						<td>
+							<xsl:value-of select="RecruitmentStartDate"/>
+						</td>
+						<td>
+							<xsl:value-of select="RecruitmentEndDate"/>
+						</td>
+						<td>
+							<xsl:value-of select="/NewDataSet/Responses[(./FAName='NIHRTargetRecruit')and(./REventID=current()/SAREventID)]/ROptionID" />
+							<br/>
+						</td>
+						<td>
+							<xsl:value-of select="/NewDataSet/Responses[(./FAName='NIHRCRFTargetRecruit')and(./REventID=current()/SAREventID)]/ROptionID" />
+							<br/>
+						</td>
+						<td>
+							<xsl:value-of select="/NewDataSet/Recruitment[./SREventID=current()/SREventID]/Recruited"/>
+							<br/>
+						</td>
+						<td>
+							<xsl:value-of select="/NewDataSet/Screened[./SREventID=current()/SREventID]/Screened"/>
+							<br/>
+						</td>
+					</xsl:if>
+
+					<xsl:if test="NIHR=1">
+
+						<!-- REC Approval Required -->
+
+						<td onclick="return OpenPage('../Dialogs/EditAmendment.aspx?uimode=Mode1&amp;reid={SAREventID}','',1000,1000,true,false,true,0);">
+							<div>
+								<xsl:value-of select="/NewDataSet/Responses[(./FAName='NIHR-SC-ClinicalNonClinical')and(./REventID=current()/SAREventID)]/ROptionID" />
+							</div>
+						</td>
+
+						<!-- Research Type -->
+						<xsl:choose>
+							<xsl:when test="/NewDataSet/Responses[(./FAName='NIHR-SC-ClinicalNonClinical') and (./ROptionID='Yes') and (./REventID=current()/SAREventID)]">
+								<xsl:choose>
+									<xsl:when test="/NewDataSet/Responses[(./FAName='NIHR-SC-ResearchType-RECYes') and (./ROptionID='Project administering questionnaires/interviews for quantitative or mixed quantitative/qualitative a') and (./REventID=current()/SAREventID)]">
+										<td onclick="return OpenPage('../Dialogs/EditAmendment.aspx?uimode=Mode1&amp;reid={SAREventID}','',1000,1000,true,false,true,0);">
+											<div>
+												Project administering questionnaires/interviews for quantitative or mixed quantitative/qualitative analysis
+											</div>
+										</td>
+									</xsl:when>
+									<xsl:otherwise>
+										<td onclick="return OpenPage('../Dialogs/EditAmendment.aspx?uimode=Mode1&amp;reid={SAREventID}','',1000,1000,true,false,true,0);">
+											<div>
+												<xsl:value-of select="/NewDataSet/Responses[(./FAName='NIHR-SC-ResearchType-RECYes')and(./REventID=current()/SAREventID)]/ROptionID" />
+											</div>
+										</td>
+									</xsl:otherwise>
+								</xsl:choose>
+							</xsl:when>
+							<xsl:when test="/NewDataSet/Responses[(./FAName='NIHR-SC-ClinicalNonClinical') and (./ROptionID='No') and (./REventID=current()/SAREventID)]">
+								<td onclick="return OpenPage('../Dialogs/EditAmendment.aspx?uimode=Mode1&amp;reid={SAREventID}','',1000,1000,true,false,true,0);">
+									<div>
+										<xsl:value-of select="/NewDataSet/Responses[(./FAName='NIHR-SC-ResearchType-RECNo')and(./REventID=current()/SAREventID)]/ROptionID" />
+									</div>
+								</td>
+							</xsl:when>
+							<xsl:otherwise>
+								<td>
+									<br/>
+								</td>
+							</xsl:otherwise>
+						</xsl:choose>
+
+						<!-- Project Type -->
+						<td onclick="return OpenPage('../Dialogs/EditAmendment.aspx?uimode=Mode1&amp;reid={SAREventID}','',1000,1000,true,false,true,0);">
+							<div>
+								<xsl:value-of select="/NewDataSet/Responses[(./FAName='NIHR-SC-StudyType-Interventional')and(./REventID=current()/SAREventID)]/ROptionID" />
+							</div>
+						</td>
+
+
+						<!-- Primary Intervention -->
+						<td onclick="return OpenPage('../Dialogs/EditAmendment.aspx?uimode=Mode1&amp;reid={SAREventID}','',1000,1000,true,false,true,0);">
+							<div>
+								<xsl:value-of select="/NewDataSet/Responses[(./FAName='NIHR-SC-PrimaryIntervention')and(./REventID=current()/SAREventID)]/ROptionID" />
+							</div>
+						</td>
+
+						<td onclick="return OpenPage('../Dialogs/EditAmendment.aspx?uimode=Mode1&amp;reid={SAREventID}','',1000,1000,true,false,true,0);">
+							<div>
+								<xsl:value-of select="/NewDataSet/Responses[(./FAName='NIHROther')and(./REventID=current()/SAREventID)]/ROptionID" />
+							</div>
+						</td>
+
+					</xsl:if>
+
+
+					<td >
+						<xsl:value-of select="WTIntensity" />
+					</td>
+
+
+					<!-- Fields dependent on filter selection -->
+
+
+					<xsl:if test="/NewDataSet/Fields[(./FAName=$selectedField)]/FormFieldID">
+						<xsl:for-each select="/NewDataSet/Responses[(./FAName=$selectedField)and(./REventID=current()/SAREventID)and not(./FAName='NIHRTargetRecruit')and not(./FAName='NIHRCRFTargetRecruit')]">
+							<td class="col_nowrap" >
+								<div>
+									<xsl:value-of select="ROptionID" />
+								</div>
+								<br/>
+							</td>
+						</xsl:for-each>
+					</xsl:if>
+
+				</tr>
+			</xsl:template>
+		</xsl:stylesheet>
+	</crf:body>
+</crf:areaConfiguration>

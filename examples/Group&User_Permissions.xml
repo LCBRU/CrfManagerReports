@@ -1,0 +1,350 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="Rights">
+      <crf:searchOptions>
+        <crf:parameter name="Users" type="nvarchar" displayName="Where the user is" defaultText="All users">
+          <crf:query>
+            SELECT
+            DisplayName AS TextField,
+            ContactID AS ValueField
+            FROM
+            view_users
+            ORDER BY
+            DisplayName ASC;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="Areas" type="nvarchar" displayName="Where the area is" defaultText="All areas">
+          <crf:query>
+            SELECT
+            WAName AS TextField,
+            WAreaID AS ValueField
+            FROM
+            view_Areas
+            ORDER BY
+            WAName ASC;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="GroupID" type="nvarchar" displayName="Where the group is" multiSelect="true" columns="3" initialSelection="All">
+          <crf:query>
+            SELECT
+            GName AS TextField,
+            GroupID AS ValueField
+            FROM
+            WTCRFGroups
+            WHERE
+            GType=1
+            ORDER BY
+            GName ASC;
+          </crf:query>
+        </crf:parameter>
+      </crf:searchOptions>
+
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @Users NVARCHAR(2000);
+        DECLARE @Areas NVARCHAR(2000);
+        DECLARE @GroupID nvarchar(MAX);
+
+        DECLARE @GroupIDs TABLE
+        (
+        GroupID INT PRIMARY KEY
+        )
+
+        IF ( @ItemID IS NOT NULL )
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue VARCHAR(40)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @Users=FieldValue FROM @ViewParams WHERE FieldName='Users';
+        SELECT @Areas=FieldValue FROM @ViewParams WHERE FieldName='Areas';
+        SELECT @GroupID=FieldValue FROM @ViewParams WHERE FieldName='GroupID';
+
+        END
+
+        INSERT INTO @GroupIDs(GroupID)
+        SELECT
+        ItemID
+        FROM
+        dbo.get_IntegerTable(@GroupID);
+
+        SELECT DISTINCT
+        GName,
+        GroupID,
+        VA.WAName AS AreaName,
+        WR.WRView AS WRView,
+        WR.WRAdd AS WRAdd,
+        WR.WREdit AS WREdit,
+        WR.WRDelete AS WRDelete
+
+        FROM
+        WTCRFRights WR
+        LEFT OUTER JOIN view_Areas VA ON VA.WAreaID=WR.WRAreaID
+        LEFT OUTER JOIN WTCRFGroups WG ON WG.GroupID=WR.WRGroupID
+        LEFT OUTER JOIN WTCRFGroupUsers WGU ON WGU.WGroupID=WG.GroupID
+        LEFT OUTER JOIN view_Users VU ON VU.UserID=WGU.WUserID
+        
+
+
+
+        WHERE
+        GType=1
+        AND
+        (@Areas IS NULL OR VA.WAreaID=@Areas)
+        AND
+        WAName IS NOT NULL
+        AND
+        (@Users IS NULL OR VU.ContactID=@Users)
+
+        ORDER BY
+        GName,
+        VA.WAName;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="GroupList">
+      <crf:statement>
+        SELECT DISTINCT
+        GName,
+        GroupID
+        FROM
+        WTCRFGroups WG
+        LEFT OUTER JOIN WTCRFGroupUsers WGU ON WGU.WGroupID=WG.GroupID
+        LEFT OUTER JOIN view_Users VU ON VU.UserID=WGU.WUserID
+        WHERE
+        GType=1
+        AND
+        (@GroupID IS NULL OR GroupID IN (SELECT GroupID FROM @GroupIDs))
+        AND
+        (@Users IS NULL OR VU.ContactID=@Users)
+
+        ORDER BY
+        GName ASC;
+      </crf:statement>
+    </crf:query>
+    <crf:query name="UserList">
+      <crf:statement>
+        SELECT DISTINCT
+        GName
+        FROM
+        WTCRFGroups WG
+        LEFT OUTER JOIN WTCRFGroupUsers WGU ON WGU.WGroupID=WG.GroupID
+        LEFT OUTER JOIN view_Users VU ON VU.UserID=WGU.WUserID
+        WHERE
+        GType=1
+        AND
+        (@GroupID IS NULL OR GroupID IN (SELECT GroupID FROM @GroupIDs))
+        AND
+        (@Users IS NULL OR VU.ContactID=@Users)
+      </crf:statement>
+    </crf:query>
+    <crf:query name="UserRights">
+      <crf:statement>
+        SELECT
+        DisplayName AS UserRightsDName,
+        Username,
+        WUStatusID,
+        GroupID,
+        GName
+        FROM
+        WTCRFGroups WG
+        LEFT OUTER JOIN WTCRFGroupUsers WGU ON WGU.WGroupID=WG.GroupID
+        LEFT OUTER JOIN view_Users VU ON VU.UserID=WGU.WUserID
+        WHERE
+        GType=1
+        AND
+        (@Users IS NULL OR VU.ContactID=@Users)
+        AND
+        (@GroupID IS NULL OR GroupID IN (SELECT GroupID FROM @GroupIDs))
+        ORDER BY
+        DisplayName;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div style="padding:10px;">
+          <h1>User &amp; Group Permissions</h1>
+          
+          This report lists all the groups, their rights and their users.
+          
+          <h1>Group Rights</h1>
+
+          <xsl:apply-templates select="GroupList" />
+          <br/>
+          <h1>Users</h1>
+
+          <xsl:apply-templates select="UserList"/>
+
+        </div>
+      </xsl:template>
+      <xsl:template match="GroupList">
+
+        <h2>
+          <xsl:value-of select="GName" />
+        </h2>
+        <table class="grid" cellpadding="3" cellspacing="0">
+          <thead>
+            <tr>
+              <td>
+                Area
+              </td>
+              <td>
+                View
+              </td>
+              <td>
+                Add
+              </td>
+              <td>
+                Edit
+              </td>
+              <td>
+                Delete
+              </td>
+            </tr>
+          </thead>
+          <xsl:apply-templates select="/NewDataSet/Rights[(./GroupID=current()/GroupID)]" />
+          
+
+        </table>
+      </xsl:template>
+
+      <xsl:template match="Rights">
+        <tr>
+          <td>
+            <xsl:value-of select="AreaName" />
+            <br/>
+          </td>
+          <xsl:choose>
+            <xsl:when test="WRView='true'">
+              <td style="background-color:#E0F0B2;">
+                Yes
+                <br/>
+              </td>
+            </xsl:when>
+            <xsl:otherwise>
+              <td>
+                No
+                <br/>
+              </td>
+            </xsl:otherwise>
+          </xsl:choose>
+          <xsl:choose>
+            <xsl:when test="WRAdd='true'">
+              <td style="background-color:#E0F0B2;">
+                Yes
+                <br/>
+              </td>
+            </xsl:when>
+            <xsl:otherwise>
+              <td>
+                No
+                <br/>
+              </td>
+            </xsl:otherwise>
+          </xsl:choose>
+          <xsl:choose>
+            <xsl:when test="WREdit='true'">
+              <td style="background-color:#E0F0B2;">
+                Yes
+                <br/>
+              </td>
+            </xsl:when>
+            <xsl:otherwise>
+              <td>
+                No
+                <br/>
+              </td>
+            </xsl:otherwise>
+          </xsl:choose>
+          <xsl:choose>
+            <xsl:when test="WRDelete='true'">
+              <td style="background-color:#E0F0B2;">
+                Yes
+                <br/>
+              </td>
+            </xsl:when>
+            <xsl:otherwise>
+              <td>
+                No
+                <br/>
+              </td>
+            </xsl:otherwise>
+          </xsl:choose>
+        </tr>
+      </xsl:template>
+
+
+      <xsl:template match="UserList">
+        <h2>
+          <xsl:value-of select="GName" />
+        </h2>
+
+        <table class="grid" cellpadding="3" cellspacing="0" width="250px;">
+          <thead>
+            <tr>
+              <td>
+                Users
+              </td>
+              <td>
+                Username
+              </td>
+              <td>
+                Account Status
+              </td>
+
+            </tr>
+          </thead>
+          <xsl:apply-templates select="/NewDataSet/UserRights[(./GName=current()/GName)]" />
+        </table>
+      </xsl:template>
+
+      <xsl:template match="UserRights">
+            <tr>
+              <td>
+                <xsl:value-of select="UserRightsDName" />
+                <br/>
+              </td>
+              <td>
+                <xsl:value-of select="Username" />
+                <br/>
+              </td>
+              <xsl:choose>
+                <xsl:when test="WUStatusID=1">
+                  <td>
+                    Enabled<br/>
+                  </td>
+                </xsl:when>
+                <xsl:when test="WUStatusID=0">
+                  <td style="color:#CF1B24">
+                    Disabled<br/>
+                  </td>
+                </xsl:when>
+                <xsl:otherwise>
+                  <td>
+                    <br/>
+                  </td>
+                </xsl:otherwise>
+              </xsl:choose>
+
+            </tr>
+      </xsl:template>
+      
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

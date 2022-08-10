@@ -1,0 +1,65 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>S00033V01</crf:version>
+    <crf:analysis>Data administration</crf:analysis>
+    <crf:analysis>Users</crf:analysis>
+    <crf:analysis></crf:analysis>
+    <crf:summary>Report on active user accounts</crf:summary>
+    <crf:notes>
+    Simple report providing name and email for all active user accounts
+    </crf:notes>
+    <crf:InternalNotes>
+    </crf:InternalNotes>
+  </crf:comment>
+  <crf:queryBatch>
+    <crf:query name="Users">
+      <crf:statement>
+        SET NOCOUNT ON;
+        SELECT
+        (VC.Firstname+' '+VC.Surname) AS DisplayName,
+        VU.Username,
+        VU.Email
+        FROM
+        view_Users VU INNER JOIN view_Contacts VC ON VU.ContactID=VC.ContactID
+        WHERE
+        vU.WUStatusID=1
+        ORDER BY
+        VC.Surname;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="html" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <table class="grid">
+            <thead>
+              <td>Name</td>
+              <td>Username</td>
+              <td>Email</td>
+            </thead>
+            <tr>
+              <xsl:apply-templates select="Users" />
+            </tr>
+          </table>
+        </div>
+      </xsl:template>
+      <xsl:template match="Users">
+        <tr>
+          <td style="vertical-align:top;">
+            <xsl:value-of select="DisplayName" />
+          </td>
+          <td style="vertical-align:top;">
+            <xsl:value-of select="Username" />
+          </td>
+          <td style="vertical-align:top;">
+            <a href="mailto:{Email}">
+              <xsl:value-of select="Email" />
+            </a>
+          </td>    
+        </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

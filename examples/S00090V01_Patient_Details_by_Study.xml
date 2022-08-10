@@ -1,0 +1,302 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>
+      S00090V01</crf:version>
+    <crf:analysis>Patients</crf:analysis>
+    <crf:analysis>Studies</crf:analysis>
+    <crf:analysis></crf:analysis>
+    <crf:summary>A report to list all patient contact details in that study including identifiers.</crf:summary>
+    <crf:notes>
+
+    </crf:notes>
+  </crf:comment>
+  <crf:queryBatch>
+    <crf:query name="Studies">
+      <crf:searchOptions>
+        <crf:parameter name="StudySummary" type="nvarchar" maxLength="30" useSearchConditions="true" displayName="The study identifier or name"/>
+      </crf:searchOptions>
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StudySummary NVARCHAR(500);
+
+        IF (@ItemID IS NOT NULL)
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue NVARCHAR(1000)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StudySummary=FieldValue FROM @ViewParams WHERE FieldName='StudySummary';
+        END;
+
+        DECLARE @Studies TABLE
+        (
+        SAREventID UNIQUEIDENTIFIER PRIMARY KEY
+        )
+
+        INSERT INTO @Studies(SAREventID)
+        SELECT
+        SAREventID
+        FROM
+        view_StudyAmendments VSA
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) VUR ON VSA.REAreaID=VUR.WAreaID
+        WHERE
+        (@StudySummary IS NULL OR SIdentifier LIKE @StudySummary OR SName LIKE @StudySummary);
+
+
+        SELECT
+        VSA.SREventID,
+        VSA.StudySummary,
+        VSA.SIdentifier,
+        VSA.SName,
+        VP.PFirstname,
+        VP.PSurname,
+        VP.PPrimaryIdentifier,
+        VPS.PSIdentifier,
+        VPS.PSSTName,
+        CONVERT(NVARCHAR(12),VPS.PSRecruitmentDate,106) AS PSRecruitmentDate,
+        VP.PSecondaryIdentifier,
+        VP.PIdentifier3,
+        VP.PIdentifier4,
+        VP.PAddress1,
+        VP.PAddress2,
+        VP.PAddress3,
+        VP.PAddress4,
+        VP.PPostcode,
+        VP.PEmail,
+        CONVERT(NVARCHAR(12),VP.PDateOfBirth,106) AS DateOfBirth,
+        CASE
+        WHEN VP.PGender IS NULL THEN 'Not Specified'
+        WHEN VP.PGender = 0 THEN 'Female'
+        WHEN VP.PGender = 1 THEN 'Male'
+        ELSE ''
+        END AS PGender,
+        (SELECT wobjname FROM WTCRFObjects WHERE wobjtype = 10006 and wobjectid = VP.PEthnicOriginID) AS PEthnicOriginID,
+        /* VP.PEthnicOriginID, */
+        /* VP.PReligionID, */
+        (SELECT wobjname FROM WTCRFObjects WHERE wobjtype = 10010 and wobjectid = VP.PReligionID) AS PReligionID,
+        VP.PTelephone,
+        VP.PMobile
+        FROM view_StudyAmendments VSA
+        INNER JOIN view_PatientStudies VPS ON VPS.SREventID=VSA.SREventID
+        INNER JOIN WTCRFPatients VP ON VP.PatientID=VPS.PatientID
+        INNER JOIN @Studies S ON VSA.SAREventID=S.SAREventID
+        --INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=1)) VUR ON VPS.REAreaID=VUR.WAreaID
+       INNER JOIN view_Resources VR ON VP.PatientID=VR.ResourceID
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WRView=1) AND (WUserID=@UserID)) VUR ON VR.RAreaID=VUR.WAreaID
+       WHERE
+        SANumber=0
+        ORDER BY
+        VSA.SIdentifier,
+        VSA.SName,
+        VP.PSurname,VP.PFirstname;
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="StatusStyles">
+      <crf:statement>
+        SELECT
+        WUIAreaID,
+        WUIName,
+        WUIScript
+        FROM
+        WTCRFUserInterface
+        WHERE
+        (WUIAreaID IN (305))
+        AND (WUIType='Style');
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        @StudySummary AS studyidentifier;
+      </crf:statement>
+    </crf:query> 
+  
+  </crf:queryBatch>
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:crf-utils="crf:utilities" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <h1>Studies Patient Lists</h1>
+          <div class="paragraph">
+            Study Identifier or Name selected:  <xsl:value-of select="translate(Configuration/studyidentifier,'%','')"/>
+            <br/>
+            Number of Patients:  <xsl:value-of select="count(/NewDataSet/Studies[(./PSIdentifier)])" />
+          </div>
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <tr class="color_block_1">
+              <td>
+                Study
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PFirstname',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PSurname',1)"/>
+              </td>
+              <td>
+                Patient Study ID  
+              </td>
+              <td>
+                Patient Status 
+              </td>
+              <td>
+                Recruitment Date
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PPrimaryIdentifier',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PSecondaryIdentifier',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PIdentifier3',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PIdentifier4',1)"/>
+              </td>
+              <td colspan="4">
+                <xsl:value-of select="crf-utils:Label(300,'PAddress1',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PPostcode',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PEmail',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PDateOfBirth',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PGender',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PEthnicOriginID',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PReligionID',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PTelephone',1)"/>
+              </td>
+              <td>
+                <xsl:value-of select="crf-utils:Label(300,'PMobile',1)"/>
+              </td>
+
+            </tr>
+            <xsl:apply-templates select="/NewDataSet/Studies"/>
+          </table>
+        </div>
+      </xsl:template>
+       
+      
+      <!-- Study details -->
+      <xsl:template match="Studies">
+        <tr>
+          <td>
+            <xsl:value-of select="StudySummary" />
+          </td>
+          <td>
+            <xsl:value-of select="PFirstname" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PSurname"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PSIdentifier" />
+            <br/>
+          </td>
+          <xsl:variable name="Style" select="/NewDataSet/StatusStyles[(./WUIName=concat('Status ',current()/PSSTName))]/WUIScript" />
+          <td style="{$Style}">
+            <xsl:value-of select="PSSTName" />
+            <br />
+          </td>
+          <td>
+            <xsl:value-of select="PSRecruitmentDate" />
+          </td>
+          <td>
+            <xsl:value-of select="PPrimaryIdentifier"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PSecondaryIdentifier"/>
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PIdentifier3" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PIdentifier4" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PAddress1" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PAddress2" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PAddress3" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PAddress4" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PPostcode" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PEmail" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="DateOfBirth" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PGender" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PEthnicOriginID" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PReligionID" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PTelephone" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="PMobile" />
+            <br/>
+          </td>
+        </tr>
+      </xsl:template>
+
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

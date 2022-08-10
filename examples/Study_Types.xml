@@ -1,0 +1,365 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:queryBatch>
+    <crf:query name="StudyType">
+      <crf:searchOptions>
+        <crf:parameter name="ResourceID" type="nvarchar" displayName="Where the type is" defaultText="Any type">
+          <crf:query>
+            SELECT
+            ResourceID AS ValueField,
+            ResourceName AS TextField
+            FROM
+            view_Resources
+            WHERE
+            (ResourceTypeID=32)
+            ORDER BY
+            ResourceName;
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StudyContactTypeID" type="int" displayName="and the study contact is" defaultText="No contact">
+          <crf:query>
+            SELECT
+            WObjectID AS ValueField,
+            WObjName AS TextField
+            FROM
+            WTCRFObjects
+            WHERE
+            (WObjType=43)
+            ORDER BY
+            WObjName
+          </crf:query>
+        </crf:parameter>
+        <crf:parameter name="StudyContactTypeID2" type="int" displayName="and another study contact is" defaultText="No contact">
+          <crf:query>
+            SELECT
+            WObjectID AS ValueField,
+            WObjName AS TextField
+            FROM
+            WTCRFObjects
+            WHERE
+            (WObjType=43)
+            ORDER BY
+            WObjName
+          </crf:query>
+        </crf:parameter>
+      </crf:searchOptions>
+
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @TimeSpanType VARCHAR(40);
+        DECLARE @ResourceID UNIQUEIDENTIFIER;
+        DECLARE @StudyContactTypeID INT;
+        DECLARE @StudyContactTypeID2 INT;
+     
+
+        IF ( @ItemID IS NOT NULL )
+        BEGIN
+        DECLARE @ViewParams TABLE
+        (
+        FieldName VARCHAR(40),
+        FieldValue VARCHAR(40)
+        )
+
+        INSERT INTO @ViewParams
+        SELECT
+        WSFName,
+        WSFValue
+        FROM
+        WTCRFStateFields
+        WHERE
+        WSFStateID=@ItemID;
+
+        SELECT @StartDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='StartDate';
+        SELECT @EndDate=CONVERT(DATETIME,FieldValue,103) FROM @ViewParams WHERE FieldName='EndDate';
+
+        SELECT @TimeSpanType=FieldValue FROM @ViewParams WHERE FieldName='TimeSpanType';
+        SELECT @ResourceID=FieldValue FROM @ViewParams WHERE FieldName='ResourceID';
+        SELECT @StudyContactTypeID=CONVERT(INT,FieldValue) FROM @ViewParams WHERE FieldName='StudyContactTypeID';
+        SELECT @StudyContactTypeID2=CONVERT(INT,FieldValue) FROM @ViewParams WHERE FieldName='StudyContactTypeID2';
+        END
+
+        IF (@StartDate IS NULL) AND (@EndDate IS NULL)
+        BEGIN
+        EXEC get_TimeSpan @TimeSpanType,@StartDate OUTPUT,@EndDate OUTPUT;
+        END;
+
+
+        IF (@EndDate&lt;@StartDate)
+        BEGIN
+        RETURN;
+        END;
+
+        DECLARE @Now DATETIME;
+        SET @Now=GETDATE();
+
+        SELECT
+        SResourceID AS ResourceID,
+        SResourceName AS ResourceName,
+        SIdentifier,
+        SName,
+        SAName,
+        CONVERT(NVARCHAR(12),VSA.REStartDate,106) AS StartDate,
+        CONVERT(NVARCHAR(12),VSA.REEndDate,106) AS EndDate,
+        VSC.SCTName,
+        VSC.SCTypeID,
+        VSC.DisplayName AS VSCDispalyName,
+        VSC.Telephone AS VSCTelephone,
+        VSC.EMail AS VSCEMail,
+        VSC2.SCTName,
+        VSC2.SCTypeID,
+        VSC2.DisplayName AS VSCDispalyName2,
+        VSC2.Telephone AS VSCTelephone2,
+        VSC2.EMail AS VSCEMail2,
+        SAStatusName,
+        SAStatusSubID,
+        SALive,
+        SANumber AS SANumber
+
+        FROM
+        view_StudyAmendments VSA
+        INNER JOIN (SELECT DISTINCT WAreaID FROM view_UserRights WHERE (WUserID=@UserID) AND (WRView=1)) STUDYRIGHTS ON VSA.REAreaID=STUDYRIGHTS.WAreaID
+        LEFT OUTER JOIN view_StudyContacts VSC ON VSA.SREventID=VSC.RECERootID AND VSC.SCTypeID=@StudyContactTypeID
+        LEFT OUTER JOIN view_StudyContacts VSC2 ON VSA.SREventID=VSC2.RECERootID AND VSC2.SCTypeID=@StudyContactTypeID2
+
+        WHERE
+        (@ResourceID IS NULL OR VSA.SResourceID=@ResourceID)
+
+        ORDER BY
+        SResourceName,
+        SName,
+        SIdentifier,
+        VSC.DisplayName,
+        VSC2.DisplayName,
+        SAStatusName;
+      </crf:statement>
+
+    </crf:query>
+    <crf:query name="StudyTypes">
+      <crf:statement>
+        SELECT
+        ResourceID ,
+        ResourceName
+        FROM
+        view_Resources
+        WHERE
+        (ResourceTypeID=32)
+        AND
+        (@ResourceID IS NULL OR ResourceID=@ResourceID)
+        ORDER BY
+        ResourceName;
+      </crf:statement>
+    </crf:query>
+    
+    <crf:query name="Configuration">
+      <crf:statement>
+        SELECT
+        (SELECT WobjName FROM WTCRFObjects WHERE WobjectID=@StudyContactTypeID) AS StudyContactType,
+        (SELECT WobjName FROM WTCRFObjects WHERE WobjectID=@StudyContactTypeID2) AS StudyContactType2,
+        (SELECT ResourceName FROM view_Resources WHERE ResourceID=@ResourceID) AS StudyResourceID;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+ 
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="xml" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div style="padding:10px;">
+        <div>
+          <h1>Study Types</h1>
+
+          <div class="paragraph">
+            The following studies are selected:
+          </div>
+
+          <xsl:apply-templates select="StudyTypes" />
+          <xsl:apply-templates select="FormatDate" />
+
+        </div>
+        </div>
+      </xsl:template>
+
+
+      <xsl:template match="StudyTypes">     
+        <h2>
+          <xsl:value-of select="ResourceName" />
+        </h2>
+        <h3>
+          Number of studies: <xsl:value-of select="count(/NewDataSet/StudyType[(./ResourceID=current()/ResourceID)])" />
+        </h3>
+        <table class="grid" cellpadding="2" cellspacing="0" style="margin-top:20px;">
+          <thead>
+            <tr>
+              <td>
+                Study Identifier
+              </td>
+              <td>
+                Study Name
+              </td>
+              <td>
+                Actual Start Date
+              </td>
+              <td>
+                Actual End Date
+              </td>
+              <td>
+                Status
+              </td>
+              <td>
+                Live
+              </td>
+              <xsl:if test="/NewDataSet/Configuration/StudyContactType">
+                <td style="background-color: white;">
+                </td>
+               <td style="background-color:#FFD391;">
+                  <xsl:value-of select="/NewDataSet/Configuration/StudyContactType" />
+                </td>
+              </xsl:if>
+              <xsl:if test="/NewDataSet/Configuration/StudyContactType">
+                <td style="background-color:#FFD391;">
+                  Telephone
+                </td>
+              </xsl:if>
+              <xsl:if test="/NewDataSet/Configuration/StudyContactType">
+                <td style="background-color:#FFD391;">
+                  EMail
+                </td>
+              </xsl:if>
+              <xsl:if test="/NewDataSet/Configuration/StudyContactType2">
+                <td style="background-color:#99D6EB;">
+                  <xsl:value-of select="/NewDataSet/Configuration/StudyContactType2" />
+                </td>
+              </xsl:if>
+              <xsl:if test="/NewDataSet/Configuration/StudyContactType2">
+                <td style="background-color:#99D6EB;">
+                  Telephone
+                </td>
+              </xsl:if>
+              <xsl:if test="/NewDataSet/Configuration/StudyContactType2">
+                <td style="background-color:#99D6EB;">
+                  EMail
+                </td>
+              </xsl:if>
+            </tr>
+          </thead>
+          <xsl:apply-templates select="/NewDataSet/StudyType[(./ResourceID=current()/ResourceID)]" />
+        </table>
+      </xsl:template>
+
+      <xsl:template match="StudyType">
+        <tr>
+          <td>
+            <xsl:value-of select="SIdentifier" />
+            <br/>
+          </td>
+          <xsl:choose>
+            <xsl:when test="SANumber=0">
+              <td>
+                <xsl:value-of select="SName" />
+                <br/>
+              </td>
+            </xsl:when>
+            <xsl:otherwise>
+              <td>
+                <xsl:value-of select="SAName" />
+                <br/>
+              </td>
+            </xsl:otherwise>
+          </xsl:choose>
+          <td>
+            <xsl:value-of select="StartDate" />
+            <br/>
+          </td>
+          <td>
+            <xsl:value-of select="EndDate" />
+            <br/>
+          </td>
+          <xsl:choose>
+            <xsl:when test="SAStatusSubID=0">
+              <td style="background-color:#11ff11;">
+                <xsl:value-of select="SAStatusName" />
+                <br/>
+              </td>
+            </xsl:when>
+            <xsl:otherwise>
+              <td>
+                <xsl:value-of select="SAStatusName" />
+                <br/>
+              </td>
+            </xsl:otherwise>
+          </xsl:choose>
+          <xsl:choose>
+            <xsl:when test="SALive='true'">
+              <td style="background-color:#11ff11;">
+                Live
+                <br/>
+              </td>
+            </xsl:when>
+            <xsl:otherwise>
+              <td>
+                <br/>
+              </td>
+            </xsl:otherwise>
+          </xsl:choose>
+          <xsl:if test="/NewDataSet/Configuration/StudyContactType">
+            <td>
+            </td>
+            <td style="background-color:#FFEFE0;">
+              <xsl:value-of select="VSCDispalyName" />
+              <br/>
+            </td>
+          </xsl:if>
+          <xsl:if test="/NewDataSet/Configuration/StudyContactType">
+            <td style="background-color:#FFEFE0;">
+              <xsl:value-of select="VSCTelephone" />
+              <br/>
+            </td>
+          </xsl:if>
+          <xsl:if test="/NewDataSet/Configuration/StudyContactType">
+            <td style="background-color:#FFEFE0;">
+              <xsl:value-of select="VSCEMail" />
+              <br/>
+            </td>
+          </xsl:if>
+          <xsl:if test="/NewDataSet/Configuration/StudyContactType2">
+            <td style="background-color:#EBF7FB;">
+              <xsl:value-of select="VSCDispalyName2" />
+              <br/>
+            </td>
+          </xsl:if>
+          <xsl:if test="/NewDataSet/Configuration/StudyContactType2">
+            <td style="background-color:#EBF7FB;">
+              <xsl:value-of select="VSCTelephone2" />
+              <br/>
+            </td>
+          </xsl:if>
+          <xsl:if test="/NewDataSet/Configuration/StudyContactType2">
+            <td style="background-color:#EBF7FB;">
+              <xsl:value-of select="VSCEMail2" />
+              <br/>
+            </td>
+          </xsl:if>
+        </tr>
+      </xsl:template>
+
+      <xsl:template name="FormatDate">
+
+        <xsl:param name="DateTime" />
+        <xsl:variable name="date">
+          <xsl:value-of select="substring-before($DateTime,'T')" />
+        </xsl:variable>
+
+        <xsl:if test="string-length($date) != 10">
+          <xsl:value-of select="$DateTime"/>
+        </xsl:if>
+        <xsl:if test="string-length($date) = 10">
+          <xsl:value-of select="$date"/>
+        </xsl:if>
+      </xsl:template>
+     
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>
+
