@@ -1,0 +1,77 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>S00033V01</crf:version>
+    <crf:analysis>Data administration</crf:analysis>
+    <crf:analysis>Users</crf:analysis>
+    <crf:analysis></crf:analysis>
+    <crf:summary>Report on active user accounts</crf:summary>
+    <crf:notes>
+    Simple report providing name and email for all active user accounts
+    </crf:notes>
+    <crf:InternalNotes>
+    </crf:InternalNotes>
+  </crf:comment>
+  <crf:queryBatch>
+    <crf:query name="table">
+      <crf:searchOptions>
+        <crf:parameter name="ResourceTypeID" type="nvarchar" displayName="for the following table" multiSelect="false" columns="3" initialSelection="All">
+          <crf:query>
+            SELECT
+                ResourceTypeID AS ValueField,
+                RTName AS TextField
+            FROM view_ResourceTypes
+            ORDER BY RTName;
+          </crf:query>
+        </crf:parameter>
+      </crf:searchOptions>
+
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+            r.RName AS ResourceName,
+            ro.ROTypeID,
+            ro.ROTName,
+            ro.ROTValue
+        FROM 	WTCRFResources r
+        JOIN 	view_ResourceOptions ro
+          ON ro.ResourceID = r.ResourceID
+        WHERE 	r.RResourceType = (
+            SELECT CONVERT(INT, WSFValue)
+            FROM WTCRFStateFields
+            WHERE WSFName='ResourceTypeID'
+                AND WSFStateID=@ItemID
+        );
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="html" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <table class="grid">
+            <thead>
+              <td>ResourceName</td>
+              <td>ROTypeID</td>
+              <td>ROTName</td>
+              <td>ROTValue</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="table" />
+            </tbody>
+          </table>
+        </div>
+      </xsl:template>
+      <xsl:template match="table">
+        <tr>
+          <td><xsl:value-of select="ResourceName" /></td>
+          <td><xsl:value-of select="ROTypeID" /></td>
+          <td><xsl:value-of select="ROTName" /></td>
+          <td><xsl:value-of select="ROTValue" /></td>
+        </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

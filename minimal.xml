@@ -1,0 +1,720 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>S00033V01</crf:version>
+    <crf:analysis>Data administration</crf:analysis>
+    <crf:analysis>Users</crf:analysis>
+    <crf:analysis></crf:analysis>
+    <crf:summary>Report on active user accounts</crf:summary>
+    <crf:notes>
+    Simple report providing name and email for all active user accounts
+    </crf:notes>
+    <crf:InternalNotes>
+    </crf:InternalNotes>
+  </crf:comment>
+  <crf:queryBatch>
+    <crf:query name="parameters">
+      <crf:searchOptions>
+        <crf:parameter name="StartMonth" type="int" displayName="Starting on the 1&lt;sup&gt;st&lt;/sup&gt; of">
+          <crf:query>
+            DECLARE @Months TABLE (
+            TextField NVARCHAR(10),
+            ValueField INT
+            )
+
+            INSERT INTO @Months (TextField,ValueField) VALUES ('January',1);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('February',2);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('March',3);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('April',4);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('May',5);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('June',6);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('July',7);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('August',8);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('September',9);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('October',10);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('November',11);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('December',12);
+
+            SELECT TextField,ValueField FROM @Months;
+          </crf:query>
+          <crf:parameter name="StartYear" type="int" displayName=" " maxLength="4" />
+        </crf:parameter>
+
+        <crf:parameter name="EndMonth" type="int" displayName="and ending before 1&lt;sup&gt;st&lt;/sup&gt; of">
+          <crf:query>
+            DECLARE @Months TABLE (
+            TextField NVARCHAR(10),
+            ValueField INT
+            )
+
+            INSERT INTO @Months (TextField,ValueField) VALUES ('January',1);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('February',2);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('March',3);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('April',4);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('May',5);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('June',6);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('July',7);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('August',8);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('September',9);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('October',10);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('November',11);
+            INSERT INTO @Months (TextField,ValueField) VALUES ('December',12);
+
+            SELECT TextField,ValueField FROM @Months;
+          </crf:query>
+          <crf:parameter name="EndYear" type="int" displayName=" " maxLength="4" />
+        </crf:parameter>
+
+        <crf:parameter name="OwnerList" type="nvarchar" displayName="Owning Site" multiSelect="true" initialSelection="All">
+          <crf:query>
+            SET NOCOUNT ON;
+
+            SELECT
+              r.ResourceID AS ValueField,
+              r.RName AS TextField
+            FROM 	WTCRFResources r
+            JOIN 	view_ResourceOptions ro
+              ON ro.ResourceID = r.ResourceID
+            WHERE 	r.RResourceType = 1016 -- CRF Sites
+              AND r.ResourceID IN (
+                SELECT ro.ResourceID
+                FROM view_ResourceOptions ro
+                WHERE ROTValue = 'OWNER'
+              )
+            ;
+          </crf:query>
+        </crf:parameter>
+
+      </crf:searchOptions>
+
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @StartDate DATETIME;
+        DECLARE @EndDate DATETIME;
+        DECLARE @start_time TIME = '8:30'
+        DECLARE @end_time TIME = '16:00'
+
+
+        SELECT @StartDate = DATETIMEFROMPARTS (
+          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='StartYear' AND WSFStateID=@ItemID),
+          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='StartMonth' AND WSFStateID=@ItemID),
+          1, 0, 0, 0, 0
+        )
+
+        SELECT @EndDate = DATETIMEFROMPARTS (
+          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='EndYear' AND WSFStateID=@ItemID),
+          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='EndMonth' AND WSFStateID=@ItemID),
+          1, 0, 0, 0, 0
+        )
+
+        SELECT NULL;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="owners">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        DECLARE @OwnerList NVARCHAR(MAX);
+
+        CREATE TABLE #owners(
+          id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+          name NVARCHAR(100)
+        );
+
+        SELECT @OwnerList = WSFValue
+        FROM WTCRFStateFields
+        WHERE WSFName='OwnerList'
+          AND WSFStateID=@ItemID;
+        
+        INSERT INTO #owners(id, name)
+        SELECT o.ItemID, r.RName
+        FROM dbo.get_UniqueIdentifierTable(@OwnerList) o
+        JOIN WTCRFResources r ON
+          r.ResourceID = o.ItemID
+        ;
+
+        SELECT NULL;
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="resources">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        CREATE TABLE #resources(
+          id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+          name NVARCHAR(100),
+          owner_id UNIQUEIDENTIFIER NOT NULL
+        );
+
+        INSERT INTO #resources(id, name, owner_id)
+        SELECT
+            r.ResourceID,
+            r.ResourceName,
+            r.ROwnerID
+        FROM view_Resources r
+        INNER JOIN #owners o
+          ON o.id = r.ROwnerID
+        WHERE r.ResourceTypeID IN (1010, 1018)
+            AND (r.ResourceName NOT LIKE '%outreach%')
+            AND (r.ResourceName NOT LIKE '%sample%')
+        ;
+
+        SELECT NULL;
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="resource_dates">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        CREATE TABLE #resource_dates(
+          resource_id UNIQUEIDENTIFIER NOT NULL,
+          today DATE NOT NULL,
+          tomorrow DATE NOT NULL,
+          day_of_week NVARCHAR(50) NOT NULL,
+          is_weekend BIT NOT NULL,
+          core_start_date_time DATETIME NULL,
+          core_end_date_time DATETIME NULL,
+          core_minutes INT NOT NULL
+        );
+
+        CREATE CLUSTERED INDEX #idx_resource_dates ON #resource_dates(resource_id, today);
+
+        ;WITH seq(n) AS 
+        (
+          SELECT 0 UNION ALL SELECT n + 1 FROM seq
+          WHERE n &lt; DATEDIFF(DAY, @StartDate, @EndDate)
+        ), d(d) AS
+        (
+          SELECT DATEADD(DAY, n, @StartDate)
+          FROM seq
+        ), date_details(today, tomorrow, day_of_week, is_weekend, core_start_date_time, core_end_date_time) AS
+        (
+          SELECT
+            d AS today,
+            DATEADD(DAY, 1, d) tomorrow,
+            DATENAME(weekday, d) day_of_week,
+            CASE WHEN DATEPART(WEEKDAY, d) IN (1, 7) THEN 1 ELSE 0 END is_weekend,
+            CAST(d AS DATETIME) + CAST(@start_time AS DATETIME) core_start_date_time,
+            CAST(d AS DATETIME) + CAST(@end_time AS DATETIME) core_end_date_time
+          FROM d
+        )
+
+        INSERT INTO #resource_dates (resource_id, today, tomorrow, day_of_week, is_weekend, core_start_date_time, core_end_date_time, core_minutes)
+        SELECT
+          r.id,
+          dd.today,
+          dd.tomorrow,
+          dd.day_of_week,
+          dd.is_weekend,
+          dd.core_start_date_time,
+          dd.core_end_date_time,
+          DATEDIFF(MINUTE, dd.core_start_date_time, dd.core_end_date_time) core_minutes
+        FROM date_details dd
+        CROSS JOIN #resources r
+        WHERE is_weekend = 0
+
+        UNION
+
+        SELECT
+          r.id,
+          dd.today,
+          dd.tomorrow,
+          dd.day_of_week,
+          dd.is_weekend,
+          NULL,
+          NULL,
+          0
+        FROM date_details dd
+        CROSS JOIN #resources r
+        WHERE is_weekend = 1
+
+        OPTION (MAXRECURSION 0);
+
+        SELECT NULL;
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="merge_events_to_periods">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        CREATE TABLE #merging_events (
+          id INT IDENTITY(1,1) NOT NULL,
+          resource_id NVARCHAR(50) NOT NULL,
+          is_other BIT NOT NULL,
+          start_date_time DATETIME2(7) NOT NULL,
+          end_date_time DATETIME2(7) NOT NULL,
+          merged_min_id NVARCHAR(50) NULL,
+        );
+
+        CREATE NONCLUSTERED INDEX #idx_merging_events_id ON #merging_events(id);
+        CREATE NONCLUSTERED INDEX #idx_merging_events ON #merging_events(resource_id, is_other, start_date_time, end_date_time);
+
+        INSERT INTO #merging_events (resource_id, is_other, start_date_time, end_date_time)
+        SELECT
+          re.ResourceID,
+          CASE
+            WHEN re.REAreaID = 301 THEN 0
+            ELSE 1
+          END,
+          re.TStartDate,
+          re.TEndDate
+        FROM view_ResourceEvents re
+        JOIN #owners o
+          ON o.id = re.ROwnerID
+        WHERE re.REStatusID NOT IN (
+            5871, -- Cancelled
+            5869 -- Unused
+          )
+          AND re.TStartDate &lt; @EndDate
+          AND re.TEndDate &gt; @StartDate
+        ;
+
+        UPDATE #merging_events SET merged_min_id = id;
+
+        CREATE TABLE #to_update (
+          id INT NOT NULL,
+          merged_min_id INT NOT NULL
+        );
+
+        DECLARE @todo INT;
+        SET @todo = 1
+        DECLARE @iterations INT;
+        SET @iterations = 0
+
+        WHILE (@todo &gt; 0 AND @iterations &lt; 20)
+        BEGIN
+          TRUNCATE TABLE #to_update;
+
+          INSERT INTO #to_update (id, merged_min_id)
+          SELECT a2.id, MIN(a1.merged_min_id)
+          FROM #merging_events a1
+          JOIN #merging_events a2
+            ON a2.resource_id = a1.resource_id
+            AND a2.is_other = a1.is_other
+            AND a2.start_date_time &lt;= a1.end_date_time
+            AND a2.end_date_time &gt;= a1.start_date_time
+            AND a2.merged_min_id &gt; a1.merged_min_id
+          GROUP BY a2.id
+          ;
+
+          CREATE NONCLUSTERED INDEX #idx_to_update ON #to_update(id);
+
+          UPDATE a
+          SET a.merged_min_id = u.merged_min_id
+          FROM #merging_events a
+          JOIN #to_update u
+            ON u.id = a.id
+          ;
+
+          SELECT @todo = COUNT(*) FROM #to_update;
+
+          DROP INDEX #idx_to_update ON #to_update;
+
+          SET @iterations = @iterations + 1
+
+        END
+
+        CREATE TABLE #periods(
+          id INT IDENTITY(1,1) NOT NULL,
+          merged_min_id INT NOT NULL,
+          resource_id NVARCHAR(50) NOT NULL,
+          start_date_time DATETIME2(7) NOT NULL,
+          end_date_time DATETIME2(7) NOT NULL,
+          start_date DATE NOT NULL,
+          end_date DATE NOT NULL,
+          records_mrged INT NOT NULL,
+          is_other BIT NOT NULL
+        );
+
+        INSERT INTO #periods (merged_min_id, resource_id, [start_date_time], [end_date_time], [start_date], [end_date], records_mrged, is_other)
+        SELECT
+          merged_min_id,
+          resource_id,
+          MIN(start_date_time) AS start_date_time,
+          
+          MAX(end_date_time) AS end_date_time,
+          CONVERT(DATE, MIN(start_date_time)) AS start_date,
+          CONVERT(DATE, MAX(end_date_time)) AS end_date,
+          COUNT(*),
+          is_other
+        FROM #merging_events
+        GROUP BY resource_id, merged_min_id, is_other
+        ;
+
+        CREATE NONCLUSTERED INDEX #IX_periods ON #periods(resource_id ASC);
+
+        DROP TABLE #merging_events;
+        DROP TABLE #to_update;
+
+        SELECT NULL;
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="resource_day_minutes">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        CREATE TABLE #resource_day_minutes(
+          date DATE NOT NULL,
+          resource_id NVARCHAR(50) NOT NULL,
+          other_ooh_minutes INT NOT NULL,
+          other_in_hours_minutes INT NOT NULL,
+          patient_ooh_minutes INT NOT NULL,
+          patient_in_hours_minutes INT NOT NULL,
+          day_of_week NVARCHAR(50) NOT NULL,
+          is_weekend BIT NOT NULL,
+          core_start_date_time DATETIME NULL,
+          core_end_date_time DATETIME NULL,
+          core_minutes INT NOT NULL
+        );
+
+        WITH period_days AS (
+          SELECT
+            d.resource_id,
+            d.today date,
+            IIF(d.today &gt; op.start_date_time, d.today, op.start_date_time) start_date_time,
+            IIF(d.tomorrow &lt; op.end_date_time, d.tomorrow, op.end_date_time) end_date_time,
+            op.is_other
+          FROM #resource_dates d
+          LEFT JOIN #periods op
+            ON d.today &gt;= op.start_date
+            AND d.today &lt;= op.end_date
+            AND d.resource_id = op.resource_id
+        ), period_days_minutes AS (
+
+          SELECT
+            d.resource_id,
+            d.today as date,
+            pd.start_date_time AS start_date_time,
+            d.core_start_date_time AS end_date_time,
+            1 AS out_of_hours,
+            DATEDIFF(MINUTE, pd.start_date_time, d.core_start_date_time) AS minutes,
+            pd.is_other,
+            d.day_of_week,
+            d.is_weekend,
+            d.core_start_date_time,
+            d.core_end_date_time,
+            d.core_minutes
+          FROM #resource_dates d
+          LEFT JOIN period_days pd
+            ON d.today = pd.date
+            AND d.resource_id = pd.resource_id
+          WHERE pd.start_date_time &lt; d.core_start_date_time
+
+          UNION
+
+          SELECT
+            d.resource_id,
+            d.today as date,
+            d.core_end_date_time AS start_date_time,
+            pd.end_date_time AS end_date_time,
+            1 AS out_of_hours,
+            DATEDIFF(MINUTE, d.core_end_date_time, pd.end_date_time) AS minutes,
+            pd.is_other,
+            d.day_of_week,
+            d.is_weekend,
+            d.core_start_date_time,
+            d.core_end_date_time,
+            d.core_minutes
+          FROM #resource_dates d
+          LEFT JOIN period_days pd
+            ON d.today = pd.date
+            AND d.resource_id = pd.resource_id
+          WHERE pd.end_date_time &gt; d.core_end_date_time
+
+          UNION
+
+          SELECT
+            resource_id,
+            [date],
+            start_date_time,
+            end_date_time,
+            0 AS out_of_hours,
+            DATEDIFF(MINUTE, start_date_time, end_date_time) AS minutes,
+            is_other,
+            day_of_week,
+            is_weekend,
+            core_start_date_time,
+            core_end_date_time,
+            core_minutes
+          FROM (
+            SELECT
+              d.resource_id,
+              d.today as date,
+              pd.is_other,
+              IIF(pd.start_date_time &gt; d.core_start_date_time, pd.start_date_time, d.core_start_date_time) AS start_date_time,
+              IIF(pd.end_date_time &lt; d.core_end_date_time, pd.end_date_time, d.core_end_date_time) AS end_date_time,
+              d.day_of_week,
+              d.is_weekend,
+              d.core_start_date_time,
+              d.core_end_date_time,
+              d.core_minutes
+            FROM #resource_dates d
+            LEFT JOIN period_days pd
+              ON d.today = pd.date
+              AND d.resource_id = pd.resource_id
+            WHERE pd.start_date_time &lt; d.core_end_date_time
+              AND pd.end_date_time &gt; d.core_start_date_time
+          ) x
+        )
+
+        INSERT INTO #resource_day_minutes(
+          date,
+          resource_id,
+          other_ooh_minutes,
+          other_in_hours_minutes,
+          patient_ooh_minutes,
+          patient_in_hours_minutes,
+          day_of_week,
+          is_weekend,
+          core_start_date_time,
+          core_end_date_time,
+          core_minutes
+        )
+        SELECT
+          [date],
+          resource_id,
+          COALESCE(other_ooh, 0),
+          COALESCE(other_in_hours, 0),
+          COALESCE(patient_ooh, 0),
+          COALESCE(patient_in_hours, 0),
+          day_of_week,
+          is_weekend,
+          core_start_date_time,
+          core_end_date_time,
+          core_minutes
+        FROM (
+          SELECT
+            pdm.date,
+            pdm.resource_id,
+            pdm.day_of_week,
+            pdm.is_weekend,
+            pdm.core_start_date_time,
+            pdm.core_end_date_time,
+            pdm.core_minutes,
+            CASE
+              WHEN pdm.is_other = 1 THEN
+                CASE
+                  WHEN pdm.out_of_hours = 1 THEN 'other_ooh'
+                  ELSE 'other_in_hours'
+                END
+              ELSE
+                CASE
+                  WHEN pdm.out_of_hours = 1 THEN 'patient_ooh'
+                  ELSE 'patient_in_hours'
+                END
+            END category,
+            minutes minutes
+          FROM period_days_minutes pdm
+        ) x
+        PIVOT (
+          SUM(minutes)  
+          FOR category IN (other_ooh, other_in_hours, patient_ooh, patient_in_hours)  
+        ) p
+        ;
+
+        SELECT NULL;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="site_totals">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+          o.name AS site_name,
+          SUM(other_in_hours_minutes) AS other_in_hours_minutes,
+          SUM(patient_ooh_minutes) AS patient_ooh_minutes,
+          SUM(patient_in_hours_minutes) AS patient_in_hours_minutes,
+          SUM(core_minutes) AS core_minutes
+        FROM #owners o
+        JOIN #resources r
+          ON r.owner_id = o.id
+        JOIN #resource_day_minutes rdm
+          ON rdm.resource_id = r.id
+        GROUP BY o.name
+        ;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="resource_totals">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+          o.name AS site_name,
+          r.name AS resource_name,
+          SUM(other_in_hours_minutes) AS other_in_hours_minutes,
+          SUM(patient_ooh_minutes) AS patient_ooh_minutes,
+          SUM(patient_in_hours_minutes) AS patient_in_hours_minutes,
+          SUM(core_minutes) AS core_minutes
+        FROM #owners o
+        JOIN #resources r
+          ON r.owner_id = o.id
+        JOIN #resource_day_minutes rdm
+          ON rdm.resource_id = r.id
+        GROUP BY o.name, r.name
+        ;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="day_totals">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+          day_of_week,
+          SUM(other_in_hours_minutes) AS other_in_hours_minutes,
+          SUM(patient_ooh_minutes) AS patient_ooh_minutes,
+          SUM(patient_in_hours_minutes) AS patient_in_hours_minutes,
+          SUM(core_minutes) AS core_minutes
+        FROM #owners o
+        JOIN #resources r
+          ON r.owner_id = o.id
+        JOIN #resource_day_minutes rdm
+          ON rdm.resource_id = r.id
+        GROUP BY day_of_week
+        ;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="resource_date_totals">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+          resource_id,
+          today,
+          tomorrow,
+          day_of_week,
+          is_weekend,
+          core_start_date_time,
+          core_end_date_time,
+          core_minutes
+        FROM #resource_dates
+        ;
+
+      </crf:statement>
+    </crf:query>
+
+  </crf:queryBatch>
+
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:crf-utils="crf:utilities" version="1.0">
+      <xsl:output method="html" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <table class="grid">
+            <thead>
+              <td>Site Name</td>
+              <td>other_in_hours_minutes</td>
+              <td>patient_ooh_minutes</td>
+              <td>patient_in_hours_minutes</td>
+              <td>core_minutes</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="site_totals" />
+            </tbody>
+          </table>
+
+          <table class="grid">
+            <thead>
+              <td>Site Name</td>
+              <td>Resource Name</td>
+              <td>other_in_hours_minutes</td>
+              <td>patient_ooh_minutes</td>
+              <td>patient_in_hours_minutes</td>
+              <td>core_minutes</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="resource_totals" />
+            </tbody>
+          </table>
+
+          <table class="grid">
+            <thead>
+              <td>Day of Week</td>
+              <td>other_in_hours_minutes</td>
+              <td>patient_ooh_minutes</td>
+              <td>patient_in_hours_minutes</td>
+              <td>core_minutes</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="day_totals" />
+            </tbody>
+          </table>
+
+          <table class="grid">
+            <thead>
+              <td>resource_id</td>
+              <td>today</td>
+              <td>tomorrow</td>
+              <td>day_of_week</td>
+              <td>is_weekend</td>
+              <td>core_start_date_time</td>
+              <td>core_end_date_time</td>
+              <td>core_minutes</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="resource_date_totals" />
+            </tbody>
+          </table>
+        </div>
+      </xsl:template>
+
+      <xsl:template match="site_totals">
+        <tr>
+          <td><xsl:value-of select="site_name" /></td>
+          <td><xsl:value-of select="other_in_hours_minutes" /></td>
+          <td><xsl:value-of select="patient_ooh_minutes" /></td>
+          <td><xsl:value-of select="patient_in_hours_minutes" /></td>
+          <td><xsl:value-of select="core_minutes" /></td>
+        </tr>
+      </xsl:template>
+
+      <xsl:template match="resource_totals">
+        <tr>
+          <td><xsl:value-of select="site_name" /></td>
+          <td><xsl:value-of select="resource_name" /></td>
+          <td><xsl:value-of select="other_in_hours_minutes" /></td>
+          <td><xsl:value-of select="patient_ooh_minutes" /></td>
+          <td><xsl:value-of select="patient_in_hours_minutes" /></td>
+          <td><xsl:value-of select="core_minutes" /></td>
+        </tr>
+      </xsl:template>
+
+      <xsl:template match="day_totals">
+        <tr>
+          <td><xsl:value-of select="day_of_week" /></td>
+          <td><xsl:value-of select="other_in_hours_minutes" /></td>
+          <td><xsl:value-of select="patient_ooh_minutes" /></td>
+          <td><xsl:value-of select="patient_in_hours_minutes" /></td>
+          <td><xsl:value-of select="core_minutes" /></td>
+        </tr>
+      </xsl:template>
+
+      <xsl:template match="resource_date_totals">
+        <tr>
+          <td><xsl:value-of select="resource_id" /></td>
+          <td><xsl:value-of select="today" /></td>
+          <td><xsl:value-of select="tomorrow" /></td>
+          <td><xsl:value-of select="day_of_week" /></td>
+          <td><xsl:value-of select="is_weekend" /></td>
+          <td><xsl:value-of select="core_start_date_time" /></td>
+          <td><xsl:value-of select="core_end_date_time" /></td>
+          <td><xsl:value-of select="core_minutes" /></td>
+        </tr>
+      </xsl:template>
+
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

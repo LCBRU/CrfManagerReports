@@ -1,0 +1,56 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>S00033V01</crf:version>
+    <crf:analysis>Data administration</crf:analysis>
+    <crf:analysis>Users</crf:analysis>
+    <crf:analysis></crf:analysis>
+    <crf:summary>Report on active user accounts</crf:summary>
+    <crf:notes>Simple report providing name and email for all active user accounts</crf:notes>
+    <crf:InternalNotes>
+    </crf:InternalNotes>
+  </crf:comment>
+  <crf:queryBatch>
+    <crf:query name="table">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+            REStatusTypeID,
+            RESTName
+        FROM view_ResourceEventStatusTypes VREST
+        INNER JOIN (
+            SELECT DISTINCT REStatusID
+            FROM view_ResourceEvents
+            WHERE (ResourceTypeID IN (1010,1018)) AND (REAreaID=301)
+        ) VRE ON VREST.REStatusTypeID=VRE.REStatusID
+        WHERE (RESTSubTypeID NOT IN (0,9,10))
+        ORDER BY RESTName;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="html" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <table class="grid">
+            <thead>
+              <td>REStatusTypeID</td>
+              <td>RESTName</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="table" />
+            </tbody>
+          </table>
+        </div>
+      </xsl:template>
+      <xsl:template match="table">
+        <tr>
+          <td><xsl:value-of select="REStatusTypeID" /></td>
+          <td><xsl:value-of select="RESTName" /></td>
+        </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>

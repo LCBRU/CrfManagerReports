@@ -1,0 +1,51 @@
+<crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
+  <crf:comment>
+    <crf:version>S00033V01</crf:version>
+    <crf:analysis>Data administration</crf:analysis>
+    <crf:analysis>Users</crf:analysis>
+    <crf:analysis></crf:analysis>
+    <crf:summary>Report on active user accounts</crf:summary>
+    <crf:notes>
+    Simple report providing name and email for all active user accounts
+    </crf:notes>
+    <crf:InternalNotes>
+    </crf:InternalNotes>
+  </crf:comment>
+  <crf:queryBatch>
+    <crf:query name="table">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+          ResourceTypeID,
+          RTName
+        FROM view_ResourceTypes;
+      </crf:statement>
+    </crf:query>
+  </crf:queryBatch>
+
+  <crf:body id="1" title="Print format" format="text/xml">
+    <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
+      <xsl:output method="html" indent="yes" omit-xml-declaration="yes" />
+      <xsl:template match="NewDataSet">
+        <div>
+          <table class="grid">
+            <thead>
+              <td>ResourceTypeID</td>
+              <td>RTName</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="table" />
+            </tbody>
+          </table>
+        </div>
+      </xsl:template>
+      <xsl:template match="table">
+        <tr>
+          <td><xsl:value-of select="ResourceTypeID" /></td>
+          <td><xsl:value-of select="RTName" /></td>
+        </tr>
+      </xsl:template>
+    </xsl:stylesheet>
+  </crf:body>
+</crf:areaConfiguration>
