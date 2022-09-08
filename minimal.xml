@@ -656,7 +656,7 @@
             </tbody>
           </table>
 
-          <h2>Days</h2>
+          <!-- <h2>Days</h2>
 
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
@@ -669,7 +669,7 @@
               <xsl:apply-templates select="resource_day_minutes_values" />
             </tbody>
           </table>
-
+ -->
         </div>
       </xsl:template>
 
