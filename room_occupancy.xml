@@ -1,67 +1,61 @@
 <crf:areaConfiguration xmlns:crf="http://www.crfmanager.com/system/xml">
   <crf:comment>
-    <crf:version>S00033V01</crf:version>
-    <crf:analysis>Data administration</crf:analysis>
-    <crf:analysis>Users</crf:analysis>
+    <crf:version>BRC_01</crf:version>
+    <crf:analysis>Room Booking</crf:analysis>
+    <crf:analysis>Appointments</crf:analysis>
     <crf:analysis></crf:analysis>
-    <crf:summary>Report on active user accounts</crf:summary>
-    <crf:notes>
-    Simple report providing name and email for all active user accounts
-    </crf:notes>
+    <crf:summary>Room Occupancy by Room, Site and Day os Week</crf:summary>
+    <crf:notes>Room Occupancy by Room, Site and Day os Week</crf:notes>
     <crf:InternalNotes>
     </crf:InternalNotes>
   </crf:comment>
   <crf:queryBatch>
     <crf:query name="parameters">
       <crf:searchOptions>
-        <crf:parameter name="StartMonth" type="int" displayName="Starting on the 1&lt;sup&gt;st&lt;/sup&gt; of">
+        <crf:parameter name="FirstMonth" type="int" displayName="First Month">
           <crf:query>
             DECLARE @Months TABLE (
-            TextField NVARCHAR(10),
-            ValueField INT
+              TextField NVARCHAR(20),
+              ValueField INT
             )
 
-            INSERT INTO @Months (TextField,ValueField) VALUES ('January',1);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('February',2);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('March',3);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('April',4);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('May',5);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('June',6);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('July',7);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('August',8);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('September',9);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('October',10);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('November',11);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('December',12);
+            DECLARE @date DATE = '20160101'
+
+            WHILE (@date &lt; getdate())
+            BEGIN
+              INSERT INTO @Months (TextField,ValueField) VALUES (
+                FORMAT(@date, 'yyyy MMMM'),
+                FORMAT(@date, 'yyyyMMdd')
+              );
+
+              SET @date = DATEADD(month, 1, @date)
+            END
 
             SELECT TextField,ValueField FROM @Months;
           </crf:query>
-          <crf:parameter name="StartYear" type="int" displayName=" " maxLength="4" />
         </crf:parameter>
 
-        <crf:parameter name="EndMonth" type="int" displayName="and ending before 1&lt;sup&gt;st&lt;/sup&gt; of">
+        <crf:parameter name="LastMonth" type="int" displayName="Last Month">
           <crf:query>
             DECLARE @Months TABLE (
-            TextField NVARCHAR(10),
-            ValueField INT
+              TextField NVARCHAR(20),
+              ValueField INT
             )
 
-            INSERT INTO @Months (TextField,ValueField) VALUES ('January',1);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('February',2);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('March',3);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('April',4);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('May',5);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('June',6);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('July',7);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('August',8);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('September',9);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('October',10);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('November',11);
-            INSERT INTO @Months (TextField,ValueField) VALUES ('December',12);
+            DECLARE @date DATE = '20160101'
+
+            WHILE (@date &lt; getdate())
+            BEGIN
+              INSERT INTO @Months (TextField,ValueField) VALUES (
+                FORMAT(@date, 'yyyy MMMM'),
+                FORMAT(@date, 'yyyyMMdd')
+              );
+
+              SET @date = DATEADD(month, 1, @date)
+            END
 
             SELECT TextField,ValueField FROM @Months;
           </crf:query>
-          <crf:parameter name="EndYear" type="int" displayName=" " maxLength="4" />
         </crf:parameter>
 
         <crf:parameter name="OwnerList" type="nvarchar" displayName="Owning Site" multiSelect="true" initialSelection="All">
@@ -89,23 +83,19 @@
       <crf:statement>
         SET NOCOUNT ON;
 
-        DECLARE @StartDate DATETIME;
-        DECLARE @EndDate DATETIME;
+        DECLARE @StartDate DATE;
+        DECLARE @EndDate DATE;
         DECLARE @start_time TIME = '8:30'
         DECLARE @end_time TIME = '16:30'
 
 
-        SELECT @StartDate = DATETIMEFROMPARTS (
-          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='StartYear' AND WSFStateID=@ItemID),
-          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='StartMonth' AND WSFStateID=@ItemID),
-          1, 0, 0, 0, 0
-        )
+        SELECT @StartDate = CONVERT(DATE,
+          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='FirstMonth' AND WSFStateID=@ItemID),
+          112)
 
-        SELECT @EndDate = DATETIMEFROMPARTS (
-          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='EndYear' AND WSFStateID=@ItemID),
-          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='EndMonth' AND WSFStateID=@ItemID),
-          1, 0, 0, 0, 0
-        )
+        SELECT @EndDate = DATEADD(MONTH, 1, CONVERT(DATE,
+          (SELECT WSFValue FROM WTCRFStateFields WHERE WSFName='LastMonth' AND WSFStateID=@ItemID),
+          112))
 
         SELECT NULL;
 
@@ -146,14 +136,34 @@
         CREATE TABLE #resources(
           id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
           name NVARCHAR(100),
+          ignore BIT NOT NULL,
+          constant_use BIT NOT NULL,
           owner_id UNIQUEIDENTIFIER NOT NULL
         );
 
-        INSERT INTO #resources(id, name, owner_id)
+        INSERT INTO #resources(id, name, owner_id, ignore, constant_use)
         SELECT
             r.ResourceID,
             r.ResourceName,
-            r.ROwnerID
+            r.ROwnerID,
+            CASE
+              WHEN r.ResourceID IN (
+                '7675426f-ea5a-4617-aeef-8f04f459bafd',
+                'a91cfb78-5ccb-402c-a4a7-ca66de9719fa',
+                '73918fb7-9ea9-4a57-84de-2b0e3d11ba30',
+                'e7823093-2492-4a12-a276-a76e45169d5c',
+                'f1c8222e-b252-4575-9b94-394c211a9fdb'
+                ) THEN 1
+              ELSE 0
+            END,
+            CASE
+              WHEN r.ResourceID IN (
+                'aff6535b-39cd-411b-82da-bcbf33a0cf05',
+                '37e28095-c80d-4627-8c53-0e549ce1b7dd',
+                '342fd606-5150-4efb-95f8-f7e16c220f71'
+              ) THEN 1
+              ELSE 0
+            END
         FROM view_Resources r
         INNER JOIN #owners o
           ON o.id = r.ROwnerID
@@ -161,6 +171,14 @@
             AND (r.ResourceName NOT LIKE '%outreach%')
             AND (r.ResourceName NOT LIKE '%sample%')
         ;
+
+        UPDATE #resources
+        SET name = name + ' (ignored)'
+        WHERE ignore = 1;
+
+        UPDATE #resources
+        SET name = name + ' (constant use)'
+        WHERE constant_use = 1;
 
         SELECT NULL;
       </crf:statement>
@@ -187,7 +205,7 @@
         ;WITH seq(n) AS 
         (
           SELECT 0 UNION ALL SELECT n + 1 FROM seq
-          WHERE n &lt; DATEDIFF(DAY, @StartDate, @EndDate)
+          WHERE n &lt; (DATEDIFF(DAY, @StartDate, @EndDate) - 1)
         ), d(d) AS
         (
           SELECT DATEADD(DAY, n, @StartDate)
@@ -249,22 +267,17 @@
         CREATE TABLE #merging_events (
           id INT IDENTITY(1,1) NOT NULL,
           resource_id NVARCHAR(50) NOT NULL,
-          is_other BIT NOT NULL,
           start_date_time DATETIME2(7) NOT NULL,
           end_date_time DATETIME2(7) NOT NULL,
           merged_min_id NVARCHAR(50) NULL,
         );
 
         CREATE NONCLUSTERED INDEX #idx_merging_events_id ON #merging_events(id);
-        CREATE NONCLUSTERED INDEX #idx_merging_events ON #merging_events(resource_id, is_other, start_date_time, end_date_time);
+        CREATE NONCLUSTERED INDEX #idx_merging_events ON #merging_events(resource_id, start_date_time, end_date_time);
 
-        INSERT INTO #merging_events (resource_id, is_other, start_date_time, end_date_time)
+        INSERT INTO #merging_events (resource_id, start_date_time, end_date_time)
         SELECT
           re.ResourceID,
-          CASE
-            WHEN re.REAreaID = 301 THEN 0
-            ELSE 1
-          END,
           re.TStartDate,
           re.TEndDate
         FROM view_ResourceEvents re
@@ -299,7 +312,6 @@
           FROM #merging_events a1
           JOIN #merging_events a2
             ON a2.resource_id = a1.resource_id
-            AND a2.is_other = a1.is_other
             AND a2.start_date_time &lt;= a1.end_date_time
             AND a2.end_date_time &gt;= a1.start_date_time
             AND a2.merged_min_id &gt; a1.merged_min_id
@@ -331,11 +343,10 @@
           end_date_time DATETIME2(7) NOT NULL,
           start_date DATE NOT NULL,
           end_date DATE NOT NULL,
-          records_mrged INT NOT NULL,
-          is_other BIT NOT NULL
+          records_mrged INT NOT NULL
         );
 
-        INSERT INTO #periods (merged_min_id, resource_id, [start_date_time], [end_date_time], [start_date], [end_date], records_mrged, is_other)
+        INSERT INTO #periods (merged_min_id, resource_id, [start_date_time], [end_date_time], [start_date], [end_date], records_mrged)
         SELECT
           merged_min_id,
           resource_id,
@@ -344,10 +355,9 @@
           MAX(end_date_time) AS end_date_time,
           CONVERT(DATE, MIN(start_date_time)) AS start_date,
           CONVERT(DATE, MAX(end_date_time)) AS end_date,
-          COUNT(*),
-          is_other
+          COUNT(*)
         FROM #merging_events
-        GROUP BY resource_id, merged_min_id, is_other
+        GROUP BY resource_id, merged_min_id
         ;
 
         CREATE NONCLUSTERED INDEX #IX_periods ON #periods(resource_id ASC);
@@ -366,10 +376,8 @@
         CREATE TABLE #resource_day_minutes(
           date DATE NOT NULL,
           resource_id NVARCHAR(50) NOT NULL,
-          other_ooh_minutes INT NOT NULL,
-          other_in_hours_minutes INT NOT NULL,
-          patient_ooh_minutes INT NOT NULL,
-          patient_in_hours_minutes INT NOT NULL
+          ooh_minutes INT NOT NULL,
+          in_hours_minutes INT NOT NULL
         );
 
         WITH period_days AS (
@@ -377,8 +385,7 @@
             d.resource_id,
             d.today date,
             IIF(d.today &gt; op.start_date_time, d.today, op.start_date_time) start_date_time,
-            IIF(d.tomorrow &lt; op.end_date_time, d.tomorrow, op.end_date_time) end_date_time,
-            op.is_other
+            IIF(d.tomorrow &lt; op.end_date_time, d.tomorrow, op.end_date_time) end_date_time
           FROM #resource_dates d
           LEFT JOIN #periods op
             ON d.today &gt;= op.start_date
@@ -392,8 +399,7 @@
             pd.start_date_time AS start_date_time,
             d.core_start_date_time AS end_date_time,
             1 AS out_of_hours,
-            DATEDIFF(MINUTE, pd.start_date_time, d.core_start_date_time) AS minutes,
-            pd.is_other
+            DATEDIFF(MINUTE, pd.start_date_time, d.core_start_date_time) AS minutes
           FROM #resource_dates d
           LEFT JOIN period_days pd
             ON d.today = pd.date
@@ -408,8 +414,7 @@
             d.core_end_date_time AS start_date_time,
             pd.end_date_time AS end_date_time,
             1 AS out_of_hours,
-            DATEDIFF(MINUTE, d.core_end_date_time, pd.end_date_time) AS minutes,
-            pd.is_other
+            DATEDIFF(MINUTE, d.core_end_date_time, pd.end_date_time) AS minutes
           FROM #resource_dates d
           LEFT JOIN period_days pd
             ON d.today = pd.date
@@ -424,13 +429,11 @@
             start_date_time,
             end_date_time,
             0 AS out_of_hours,
-            DATEDIFF(MINUTE, start_date_time, end_date_time) AS minutes,
-            is_other
+            DATEDIFF(MINUTE, start_date_time, end_date_time) AS minutes
           FROM (
             SELECT
               d.resource_id,
               d.today as date,
-              pd.is_other,
               IIF(pd.start_date_time &gt; d.core_start_date_time, pd.start_date_time, d.core_start_date_time) AS start_date_time,
               IIF(pd.end_date_time &lt; d.core_end_date_time, pd.end_date_time, d.core_end_date_time) AS end_date_time
             FROM #resource_dates d
@@ -439,48 +442,119 @@
               AND d.resource_id = pd.resource_id
             WHERE pd.start_date_time &lt; d.core_end_date_time
               AND pd.end_date_time &gt; d.core_start_date_time
-          ) x
+            ) x
+          
         )
 
         INSERT INTO #resource_day_minutes(
           date,
           resource_id,
-          other_ooh_minutes,
-          other_in_hours_minutes,
-          patient_ooh_minutes,
-          patient_in_hours_minutes
+          ooh_minutes,
+          in_hours_minutes
         )
         SELECT
-          [date],
-          resource_id,
-          COALESCE(other_ooh, 0),
-          COALESCE(other_in_hours, 0),
-          COALESCE(patient_ooh, 0),
-          COALESCE(patient_in_hours, 0)
+          p.[date],
+          p.resource_id,
+          SUM(COALESCE(p.ooh, 0)),
+          SUM(COALESCE(p.in_hours, 0))
         FROM (
           SELECT
             pdm.date,
             pdm.resource_id,
             CASE
-              WHEN pdm.is_other = 1 THEN
-                CASE
-                  WHEN pdm.out_of_hours = 1 THEN 'other_ooh'
-                  ELSE 'other_in_hours'
-                END
-              ELSE
-                CASE
-                  WHEN pdm.out_of_hours = 1 THEN 'patient_ooh'
-                  ELSE 'patient_in_hours'
-                END
+              WHEN pdm.out_of_hours = 1 THEN 'ooh'
+              ELSE 'in_hours'
             END category,
             minutes minutes
           FROM period_days_minutes pdm
+
         ) x
         PIVOT (
-          SUM(minutes)  
-          FOR category IN (other_ooh, other_in_hours, patient_ooh, patient_in_hours)  
+          SUM(minutes)
+          FOR category IN (ooh, in_hours)  
         ) p
+        GROUP BY p.[date],
+          p.resource_id
         ;
+
+        SELECT NULL;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="resource_day_effective">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        CREATE TABLE #resource_day_effective (
+          date DATE NOT NULL,
+          resource_id NVARCHAR(50) NOT NULL,
+          resource_name NVARCHAR(100) NOT NULL,
+          site_name NVARCHAR(100) NOT NULL,
+          month_name NVARCHAR(50) NOT NULL,
+          month_number INT NOT NULL,
+          day_name NVARCHAR(50) NOT NULL,
+          day_number INT NOT NULL,
+          ooh_minutes INT NOT NULL,
+          in_hours_minutes INT NOT NULL,
+          core_minutes INT NOT NULL,
+          ooh_minutes_effective INT NOT NULL,
+          in_hours_minutes_effective INT NOT NULL,
+          core_minutes_effective INT NOT NULL
+        );
+
+        INSERT INTO #resource_day_effective(
+          date,
+          resource_id,
+          resource_name,
+          site_name,
+          month_name,
+          month_number,
+          day_name,
+          day_number,
+          ooh_minutes,
+          in_hours_minutes,
+          core_minutes,
+          ooh_minutes_effective,
+          in_hours_minutes_effective,
+          core_minutes_effective
+        )
+        SELECT
+          rd.today,
+          rd.resource_id,
+          r.name,
+          o.name,
+          FORMAT(rd.today, 'yyyy MMMM'),
+          FORMAT(rd.today, 'yyyyMM'),
+          rd.day_name,
+          rd.day_number,
+          COALESCE(rdm.ooh_minutes, 0),
+          COALESCE(rdm.in_hours_minutes, 0),
+          COALESCE(rd.core_minutes, 0),
+          COALESCE(
+            CASE
+              WHEN r.ignore = 1 THEN 0
+              WHEN r.constant_use = 1 THEN 0
+              ELSE rdm.ooh_minutes
+            END , 0),
+          COALESCE(
+            CASE
+              WHEN r.ignore = 1 THEN 0
+              WHEN r.constant_use = 1 THEN rd.core_minutes
+              ELSE rdm.in_hours_minutes
+            END , 0),
+          CASE
+            WHEN r.ignore = 1 THEN 0
+            ELSE rd.core_minutes
+          END
+        FROM #resource_dates rd
+        JOIN #resources r
+          ON r.id = rd.resource_id
+        JOIN #owners o
+          ON o.id = r.owner_id
+        LEFT JOIN #resource_day_minutes rdm
+          ON rdm.resource_id = rd.resource_id
+          AND rdm.date = rd.today
 
         SELECT NULL;
 
@@ -492,25 +566,40 @@
         SET NOCOUNT ON;
 
         SELECT
-          o.name AS site_name,
-          SUM(COALESCE(rdm.other_in_hours_minutes, 0)) / 60.0 AS other_in_hours_minutes,
-          SUM(COALESCE(rdm.patient_ooh_minutes, 0)) / 60.0 AS patient_ooh_minutes,
-          SUM(COALESCE(rdm.patient_in_hours_minutes, 0))/ 60.0 AS patient_in_hours_minutes,
-          SUM(COALESCE(rd.core_minutes, 0)) / 60.0 AS core_minutes,
-          CASE WHEN (SUM(COALESCE(rd.core_minutes, 0)) - SUM(COALESCE(rdm.other_in_hours_minutes, 0))) > 0 THEN
-            (SUM(COALESCE(rdm.patient_in_hours_minutes, 0)) * 1.0) / (SUM(COALESCE(rd.core_minutes, 0)) - SUM(COALESCE(rdm.other_in_hours_minutes, 0)))
+          site_name,
+          SUM(in_hours_minutes_effective) / 60.0 AS in_hours_minutes_effective,
+          SUM(ooh_minutes_effective) / 60.0 AS ooh_minutes_effective,
+          SUM(core_minutes_effective) / 60.0 AS core_minutes_effective,
+          CASE WHEN (SUM(core_minutes_effective) > 0) THEN
+            (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
           ELSE
             NULL
-          END occupancy_percentage
-        FROM #resource_dates rd
-        JOIN #resources r
-          ON r.id = rd.resource_id
-        JOIN #owners o
-          ON o.id = r.owner_id
-        LEFT JOIN #resource_day_minutes rdm
-          ON rdm.resource_id = rd.resource_id
-          AND rdm.date = rd.today
-        GROUP BY o.name
+          END occupancy_percentage_effective
+        FROM #resource_day_effective
+        GROUP BY site_name
+        ;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="month_totals">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+          site_name,
+          month_name,
+          SUM(in_hours_minutes_effective) / 60.0 AS in_hours_minutes_effective,
+          SUM(ooh_minutes_effective) / 60.0 AS ooh_minutes_effective,
+          SUM(core_minutes_effective) / 60.0 AS core_minutes_effective,
+          CASE WHEN (SUM(core_minutes_effective) > 0) THEN
+            (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
+          ELSE
+            NULL
+          END occupancy_percentage_effective
+        FROM #resource_day_effective
+        GROUP BY site_name, month_name, month_number
+        ORDER BY site_name, month_number
         ;
 
       </crf:statement>
@@ -521,27 +610,27 @@
         SET NOCOUNT ON;
 
         SELECT
-          o.name AS site_name,
-          r.name AS resource_name,
-          SUM(COALESCE(rdm.other_in_hours_minutes, 0)) / 60.0 AS other_in_hours_minutes,
-          SUM(COALESCE(rdm.patient_ooh_minutes, 0)) / 60.0 AS patient_ooh_minutes,
-          SUM(COALESCE(rdm.patient_in_hours_minutes, 0)) / 60.0 AS patient_in_hours_minutes,
-          SUM(COALESCE(rd.core_minutes, 0)) / 60.0 AS core_minutes,
-          CASE WHEN (SUM(COALESCE(rd.core_minutes, 0)) - SUM(COALESCE(rdm.other_in_hours_minutes, 0))) > 0 THEN
-            (SUM(COALESCE(rdm.patient_in_hours_minutes, 0)) * 1.0) / (SUM(COALESCE(rd.core_minutes, 0)) - SUM(COALESCE(rdm.other_in_hours_minutes, 0)))
+          site_name,
+          resource_name,
+          SUM(in_hours_minutes) / 60.0 AS in_hours_minutes,
+          SUM(ooh_minutes) / 60.0 AS ooh_minutes,
+          SUM(core_minutes) / 60.0 AS core_minutes,
+          CASE WHEN (SUM(core_minutes) > 0) THEN
+            (SUM(in_hours_minutes) * 1.0) / SUM(core_minutes)
           ELSE
             NULL
-          END occupancy_percentage
-        FROM #resource_dates rd
-        JOIN #resources r
-          ON r.id = rd.resource_id
-        JOIN #owners o
-          ON o.id = r.owner_id
-        LEFT JOIN #resource_day_minutes rdm
-          ON rdm.resource_id = rd.resource_id
-          AND rdm.date = rd.today
-        GROUP BY o.name, r.name
-        ORDER BY o.name, r.name
+          END occupancy_percentage,
+          SUM(in_hours_minutes_effective) / 60.0 AS in_hours_minutes_effective,
+          SUM(ooh_minutes_effective) / 60.0 AS ooh_minutes_effective,
+          SUM(core_minutes_effective) / 60.0 AS core_minutes_effective,
+          CASE WHEN (SUM(core_minutes_effective) > 0) THEN
+            (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
+          ELSE
+            NULL
+          END occupancy_percentage_effective
+        FROM #resource_day_effective
+        GROUP BY site_name, resource_name
+        ORDER BY site_name, resource_name
         ;
 
       </crf:statement>
@@ -552,49 +641,19 @@
         SET NOCOUNT ON;
 
         SELECT
-          o.name AS site_name,          
-          rd.day_name,
-          SUM(COALESCE(rdm.other_in_hours_minutes, 0)) / 60.0 AS other_in_hours_minutes,
-          SUM(COALESCE(rdm.patient_ooh_minutes, 0)) / 60.0 AS patient_ooh_minutes,
-          SUM(COALESCE(rdm.patient_in_hours_minutes, 0)) / 60.0 AS patient_in_hours_minutes,
-          SUM(COALESCE(rd.core_minutes, 0)) / 60.0 AS core_minutes,
-          CASE WHEN (SUM(COALESCE(rd.core_minutes, 0)) - SUM(COALESCE(rdm.other_in_hours_minutes, 0))) > 0 THEN
-            (SUM(COALESCE(rdm.patient_in_hours_minutes, 0)) * 1.0) / (SUM(COALESCE(rd.core_minutes, 0)) - SUM(COALESCE(rdm.other_in_hours_minutes, 0)))
+          site_name,
+          day_name,
+          SUM(in_hours_minutes_effective) / 60.0 AS in_hours_minutes_effective,
+          SUM(ooh_minutes_effective) / 60.0 AS ooh_minutes_effective,
+          SUM(core_minutes_effective) / 60.0 AS core_minutes_effective,
+          CASE WHEN (SUM(core_minutes_effective) > 0) THEN
+            (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
           ELSE
             NULL
-          END occupancy_percentage
-        FROM #resource_dates rd
-        JOIN #resources r
-          ON r.id = rd.resource_id
-        JOIN #owners o
-          ON o.id = r.owner_id
-        LEFT JOIN #resource_day_minutes rdm
-          ON rdm.resource_id = rd.resource_id
-          AND rdm.date = rd.today
-        GROUP BY o.name, rd.day_name, rd.day_number
-        ORDER BY o.name, rd.day_number
-        ;
-
-      </crf:statement>
-    </crf:query>
-
-    <crf:query name="resource_day_minutes_values">
-      <crf:statement>
-        SET NOCOUNT ON;
-
-        SELECT
-          o.name AS site_name,
-          r.name AS resource_name,
-          FORMAT(rdm.date, 'dd MMMM yyyy') AS date,
-          COALESCE(rdm.other_in_hours_minutes, 0) other_in_hours_minutes,
-          COALESCE(rdm.patient_ooh_minutes, 0) patient_ooh_minutes,
-          COALESCE(rdm.patient_in_hours_minutes, 0) patient_in_hours_minutes
-        FROM #resources r
-        JOIN #owners o
-          ON o.id = r.owner_id
-        JOIN #resource_day_minutes rdm
-          ON rdm.resource_id = r.id
-        ORDER BY o.name, r.name, rdm.date
+          END occupancy_percentage_effective
+        FROM #resource_day_effective
+        GROUP BY site_name, day_name, day_number
+        ORDER BY site_name, day_number
         ;
 
       </crf:statement>
@@ -613,9 +672,8 @@
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
               <td>Site Name</td>
-              <td>Others In Hours (h)</td>
-              <td>Patient Out of Hours (h)</td>
-              <td>Patient In Hours (h)</td>
+              <td>In Hours (h)</td>
+              <td>Out of Hours (h)</td>
               <td>Core Hours (h)</td>
               <td>Occupancy (%)</td>
             </thead>
@@ -624,19 +682,18 @@
             </tbody>
           </table>
 
-          <h2>Rooms</h2>
+          <h2>Month Totals</h2>
 
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
-              <td>Room Name</td>
-              <td>Others In Hours (h)</td>
-              <td>Patient Out of Hours (h)</td>
-              <td>Patient In Hours (h)</td>
+              <td>Month</td>
+              <td>In Hours (h)</td>
+              <td>Out of Hours (h)</td>
               <td>Core Hours (h)</td>
               <td>Occupancy (%)</td>
             </thead>
             <tbody>
-              <xsl:apply-templates select="resource_totals" />
+              <xsl:apply-templates select="month_totals" />
             </tbody>
           </table>
 
@@ -645,9 +702,8 @@
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
               <td>Day of Week</td>
-              <td>Others In Hours (h)</td>
-              <td>Patient Out of Hours (h)</td>
-              <td>Patient In Hours (h)</td>
+              <td>In Hours (h)</td>
+              <td>Out of Hours (h)</td>
               <td>Core Hours (h)</td>
               <td>Occupancy (%)</td>
             </thead>
@@ -656,17 +712,26 @@
             </tbody>
           </table>
 
+<<<<<<< HEAD:minimal.xml
           <!-- <h2>Days</h2>
+=======
+          <h2>Rooms</h2>
+>>>>>>> 483a8be (Final version):room_occupancy.xml
 
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
-              <td>Date</td>
-              <td>Others In Hours (h)</td>
-              <td>Patient Out of Hours (h)</td>
-              <td>Patient In Hours (h)</td>
+              <td>Room Name</td>
+              <td>In Hours (h)</td>
+              <td>Out of Hours (h)</td>
+              <td>Core Hours (h)</td>
+              <td>Occupancy (%)</td>
+              <td>In Hours Effective (h)</td>
+              <td>Out of Hours Effective (h)</td>
+              <td>Core Hours Effective(h)</td>
+              <td>Occupancy Effective(%)</td>
             </thead>
             <tbody>
-              <xsl:apply-templates select="resource_day_minutes_values" />
+              <xsl:apply-templates select="resource_totals" />
             </tbody>
           </table>
  -->
@@ -676,13 +741,33 @@
       <xsl:template match="site_totals">
         <tr>
           <td><xsl:value-of select="site_name" /></td>
-          <td><xsl:value-of select="format-number(other_in_hours_minutes, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(patient_ooh_minutes, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(patient_in_hours_minutes, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(core_minutes, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
           <td class="section_head">
-            <xsl:if test="(occupancy_percentage=occupancy_percentage)">
-              <xsl:value-of select="format-number(occupancy_percentage, '0.00%')" />
+            <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
+              <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
+            </xsl:if>
+          </td>
+        </tr>
+      </xsl:template>
+
+      <xsl:template match="month_totals">
+        <xsl:if test="preceding-sibling::month_totals[1]/site_name!=site_name or position()=1">
+          <tr>
+            <td colspan="5" class="section_head">
+              <xsl:value-of select="site_name" />
+            </td>
+          </tr>
+        </xsl:if>
+        <tr>
+          <td><xsl:value-of select="month_name" /></td>
+          <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
+          <td class="section_head">
+            <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
+              <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
             </xsl:if>
           </td>
         </tr>
@@ -691,20 +776,27 @@
       <xsl:template match="resource_totals">
         <xsl:if test="preceding-sibling::resource_totals[1]/site_name!=site_name or position()=1">
           <tr>
-            <td colspan="6" class="section_head">
+            <td colspan="10" class="section_head">
               <xsl:value-of select="site_name" />
             </td>
           </tr>
         </xsl:if>
         <tr>
           <td><xsl:value-of select="resource_name" /></td>
-          <td><xsl:value-of select="format-number(other_in_hours_minutes, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(patient_ooh_minutes, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(patient_in_hours_minutes, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(in_hours_minutes, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(ooh_minutes, '0.00')" /></td>
           <td><xsl:value-of select="format-number(core_minutes, '0.00')" /></td>
           <td class="section_head">
             <xsl:if test="(occupancy_percentage=occupancy_percentage)">
               <xsl:value-of select="format-number(occupancy_percentage, '0.00%')" />
+            </xsl:if>
+          </td>
+          <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
+          <td class="section_head">
+            <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
+              <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
             </xsl:if>
           </td>
         </tr>
@@ -713,45 +805,21 @@
       <xsl:template match="day_totals">
         <xsl:if test="preceding-sibling::day_totals[1]/site_name!=site_name or position()=1">
           <tr>
-            <td colspan="6" class="section_head">
+            <td colspan="5" class="section_head">
               <xsl:value-of select="site_name" />
             </td>
           </tr>
         </xsl:if>
         <tr>
           <td><xsl:value-of select="day_name" /></td>
-          <td><xsl:value-of select="format-number(other_in_hours_minutes, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(patient_ooh_minutes, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(patient_in_hours_minutes, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(core_minutes, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
           <td class="section_head">
-            <xsl:if test="(occupancy_percentage=occupancy_percentage)">
-              <xsl:value-of select="format-number(occupancy_percentage, '0.00%')" />
+            <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
+              <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
             </xsl:if>
           </td>
-        </tr>
-      </xsl:template>
-
-      <xsl:template match="resource_day_minutes_values">
-        <xsl:if test="preceding-sibling::resource_day_minutes_values[1]/site_name!=site_name or position()=1">
-          <tr>
-            <td colspan="4" class="section_head">
-              <xsl:value-of select="site_name" />
-            </td>
-          </tr>
-        </xsl:if>
-        <xsl:if test="preceding-sibling::resource_day_minutes_values[1]/resource_name!=resource_name or position()=1">
-          <tr>
-            <td colspan="4" class="section_head">
-              <xsl:value-of select="resource_name" />
-            </td>
-          </tr>
-        </xsl:if>
-        <tr>
-          <td><xsl:value-of select="date"/></td>
-          <td><xsl:value-of select="other_in_hours_minutes" /></td>
-          <td><xsl:value-of select="patient_ooh_minutes" /></td>
-          <td><xsl:value-of select="patient_in_hours_minutes" /></td>
         </tr>
       </xsl:template>
 
