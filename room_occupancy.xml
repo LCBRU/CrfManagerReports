@@ -712,11 +712,7 @@
             </tbody>
           </table>
 
-<<<<<<< HEAD:minimal.xml
-          <!-- <h2>Days</h2>
-=======
           <h2>Rooms</h2>
->>>>>>> 483a8be (Final version):room_occupancy.xml
 
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
@@ -734,7 +730,7 @@
               <xsl:apply-templates select="resource_totals" />
             </tbody>
           </table>
- -->
+
         </div>
       </xsl:template>
 
