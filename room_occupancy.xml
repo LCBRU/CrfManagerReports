@@ -659,6 +659,36 @@
       </crf:statement>
     </crf:query>
 
+    <crf:query name="day_records">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+          site_name,
+          resource_name,
+          FORMAT(date, 'dd MMMM yyyy') AS date,
+          in_hours_minutes / 60.0 AS in_hours_minutes,
+          ooh_minutes / 60.0 AS ooh_minutes,
+          core_minutes / 60.0 AS core_minutes,
+          CASE WHEN (core_minutes > 0) THEN
+            (in_hours_minutes * 1.0) / core_minutes
+          ELSE
+            NULL
+          END occupancy_percentage,
+          in_hours_minutes_effective / 60.0 AS in_hours_minutes_effective,
+          ooh_minutes_effective / 60.0 AS ooh_minutes_effective,
+          core_minutes_effective / 60.0 AS core_minutes_effective,
+          CASE WHEN (core_minutes_effective > 0) THEN
+            (in_hours_minutes_effective * 1.0) / core_minutes_effective
+          ELSE
+            NULL
+          END occupancy_percentage_effective
+        FROM #resource_day_effective
+        ;
+
+      </crf:statement>
+    </crf:query>
+
   </crf:queryBatch>
 
   <crf:body id="1" title="Print format" format="text/xml">
@@ -728,6 +758,25 @@
             </thead>
             <tbody>
               <xsl:apply-templates select="resource_totals" />
+            </tbody>
+          </table>
+
+          <h2>Room Days</h2>
+
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <td>Date</td>
+              <td>In Hours (h)</td>
+              <td>Out of Hours (h)</td>
+              <td>Core Hours (h)</td>
+              <td>Occupancy (%)</td>
+              <td>In Hours Effective (h)</td>
+              <td>Out of Hours Effective (h)</td>
+              <td>Core Hours Effective(h)</td>
+              <td>Occupancy Effective(%)</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="day_records" />
             </tbody>
           </table>
 
@@ -808,6 +857,42 @@
         </xsl:if>
         <tr>
           <td><xsl:value-of select="day_name" /></td>
+          <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
+          <td class="section_head">
+            <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
+              <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
+            </xsl:if>
+          </td>
+        </tr>
+      </xsl:template>
+
+      <xsl:template match="day_records">
+        <xsl:if test="preceding-sibling::day_records[1]/site_name!=site_name or position()=1">
+          <tr>
+            <td colspan="10" class="section_head">
+              <xsl:value-of select="site_name" />
+            </td>
+          </tr>
+        </xsl:if>
+        <xsl:if test="preceding-sibling::day_records[1]/resource_name!=resource_name or position()=1">
+          <tr>
+            <td colspan="10" class="section_head">
+              <xsl:value-of select="resource_name" />
+            </td>
+          </tr>
+        </xsl:if>
+        <tr>
+          <td><xsl:value-of select="date" /></td>
+          <td><xsl:value-of select="format-number(in_hours_minutes, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(ooh_minutes, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(core_minutes, '0.00')" /></td>
+          <td class="section_head">
+            <xsl:if test="(occupancy_percentage=occupancy_percentage)">
+              <xsl:value-of select="format-number(occupancy_percentage, '0.00%')" />
+            </xsl:if>
+          </td>
           <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
