@@ -138,10 +138,11 @@
           name NVARCHAR(100),
           ignore BIT NOT NULL,
           constant_use BIT NOT NULL,
+          outreach BIT NOT NULL,
           owner_id UNIQUEIDENTIFIER NOT NULL
         );
 
-        INSERT INTO #resources(id, name, owner_id, ignore, constant_use)
+        INSERT INTO #resources(id, name, owner_id, ignore, constant_use, outreach)
         SELECT
             r.ResourceID,
             r.ResourceName,
@@ -152,15 +153,17 @@
                 'a91cfb78-5ccb-402c-a4a7-ca66de9719fa',
                 '73918fb7-9ea9-4a57-84de-2b0e3d11ba30',
                 'e7823093-2492-4a12-a276-a76e45169d5c',
-                'f1c8222e-b252-4575-9b94-394c211a9fdb'
-                ) THEN 1
-              ELSE 0
-            END,
-            CASE
-              WHEN r.ResourceID IN (
+                'f1c8222e-b252-4575-9b94-394c211a9fdb',
                 'aff6535b-39cd-411b-82da-bcbf33a0cf05',
                 '37e28095-c80d-4627-8c53-0e549ce1b7dd',
                 '342fd606-5150-4efb-95f8-f7e16c220f71'
+                ) THEN 1
+              ELSE 0
+            END,
+            0,
+            CASE
+              WHEN r.ResourceID IN (
+                '849237c9-cdb0-402f-ae30-e730098b8651'
               ) THEN 1
               ELSE 0
             END
@@ -168,7 +171,6 @@
         INNER JOIN #owners o
           ON o.id = r.ROwnerID
         WHERE r.ResourceTypeID IN (1010, 1018)
-            AND (r.ResourceName NOT LIKE '%outreach%')
             AND (r.ResourceName NOT LIKE '%sample%')
         ;
 
@@ -264,6 +266,31 @@
       <crf:statement>
         SET NOCOUNT ON;
 
+        CREATE TABLE #appointment_count (
+          id INT IDENTITY(1,1) NOT NULL,
+          site_name NVARCHAR(100) NOT NULL,
+          appointment_count INT NOT NULL
+        );
+
+        CREATE NONCLUSTERED INDEX #idx_appointment_count_id ON #appointment_count(id);
+        CREATE NONCLUSTERED INDEX #idx_appointment_count__site_name ON #appointment_count(site_name);
+
+        INSERT INTO #appointment_count (site_name, appointment_count)
+        SELECT
+          o.name,
+          COUNT(*)
+        FROM view_ResourceEvents re
+        JOIN #owners o
+          ON o.id = re.ROwnerID
+        WHERE re.REStatusID NOT IN (
+            5871, -- Cancelled
+            5869 -- Unused
+          )
+          AND re.TStartDate &lt; @EndDate
+          AND re.TEndDate &gt; @StartDate
+        GROUP BY o.name
+        ;
+
         CREATE TABLE #merging_events (
           id INT IDENTITY(1,1) NOT NULL,
           resource_id NVARCHAR(50) NOT NULL,
@@ -343,10 +370,10 @@
           end_date_time DATETIME2(7) NOT NULL,
           start_date DATE NOT NULL,
           end_date DATE NOT NULL,
-          records_mrged INT NOT NULL
+          appointment_count INT NOT NULL
         );
 
-        INSERT INTO #periods (merged_min_id, resource_id, [start_date_time], [end_date_time], [start_date], [end_date], records_mrged)
+        INSERT INTO #periods (merged_min_id, resource_id, [start_date_time], [end_date_time], [start_date], [end_date], appointment_count)
         SELECT
           merged_min_id,
           resource_id,
@@ -500,7 +527,8 @@
           core_minutes INT NOT NULL,
           ooh_minutes_effective INT NOT NULL,
           in_hours_minutes_effective INT NOT NULL,
-          core_minutes_effective INT NOT NULL
+          core_minutes_effective INT NOT NULL,
+          outreach_minutes_effective INT NOT NULL
         );
 
         INSERT INTO #resource_day_effective(
@@ -517,7 +545,8 @@
           core_minutes,
           ooh_minutes_effective,
           in_hours_minutes_effective,
-          core_minutes_effective
+          core_minutes_effective,
+          outreach_minutes_effective
         )
         SELECT
           rd.today,
@@ -535,18 +564,26 @@
             CASE
               WHEN r.ignore = 1 THEN 0
               WHEN r.constant_use = 1 THEN 0
+              WHEN r.outreach = 1 THEN 0
               ELSE rdm.ooh_minutes
             END , 0),
           COALESCE(
             CASE
               WHEN r.ignore = 1 THEN 0
+              WHEN r.outreach = 1 THEN 0
               WHEN r.constant_use = 1 THEN rd.core_minutes
               ELSE rdm.in_hours_minutes
             END , 0),
           CASE
             WHEN r.ignore = 1 THEN 0
+            WHEN r.outreach = 1 THEN 0
             ELSE rd.core_minutes
-          END
+          END,
+          COALESCE(
+            CASE
+              WHEN r.outreach = 1 THEN 0
+              ELSE rdm.in_hours_minutes
+            END , 0)
         FROM #resource_dates rd
         JOIN #resources r
           ON r.id = rd.resource_id
@@ -574,8 +611,10 @@
             (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
           ELSE
             NULL
-          END occupancy_percentage_effective
-        FROM #resource_day_effective
+          END occupancy_percentage_effective,
+          SUM(outreach_minutes_effective) / 60.0 AS outreach_minutes_effective,
+          ISNULL((SELECT a.appointment_count FROM #appointment_count a WHERE a.site_name = r.site_name), 0) appointment_count
+        FROM #resource_day_effective r
         GROUP BY site_name
         ;
 
@@ -706,6 +745,8 @@
               <td>Out of Hours (h)</td>
               <td>Core Hours (h)</td>
               <td>Occupancy (%)</td>
+              <td>Outreach</td>
+              <td>Appointments</td>
             </thead>
             <tbody>
               <xsl:apply-templates select="site_totals" />
@@ -794,6 +835,8 @@
               <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
             </xsl:if>
           </td>
+          <td><xsl:value-of select="format-number(outreach_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(appointment_count, '0')" /></td>
         </tr>
       </xsl:template>
 

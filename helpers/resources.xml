@@ -29,6 +29,7 @@
         SET NOCOUNT ON;
 
         SELECT
+            r.ResourceID,
             r.RName AS ResourceName,
             ro.ROTypeID,
             ro.ROTName,
@@ -53,6 +54,7 @@
         <div>
           <table class="grid">
             <thead>
+              <td>ResourceID</td>
               <td>ResourceName</td>
               <td>ROTypeID</td>
               <td>ROTName</td>
@@ -66,6 +68,7 @@
       </xsl:template>
       <xsl:template match="table">
         <tr>
+          <td><xsl:value-of select="ResourceID" /></td>
           <td><xsl:value-of select="ResourceName" /></td>
           <td><xsl:value-of select="ROTypeID" /></td>
           <td><xsl:value-of select="ROTName" /></td>
