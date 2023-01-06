@@ -153,14 +153,21 @@
                 'a91cfb78-5ccb-402c-a4a7-ca66de9719fa',
                 '73918fb7-9ea9-4a57-84de-2b0e3d11ba30',
                 'e7823093-2492-4a12-a276-a76e45169d5c',
-                'f1c8222e-b252-4575-9b94-394c211a9fdb',
-                'aff6535b-39cd-411b-82da-bcbf33a0cf05',
-                '37e28095-c80d-4627-8c53-0e549ce1b7dd',
-                '342fd606-5150-4efb-95f8-f7e16c220f71'
+                'f1c8222e-b252-4575-9b94-394c211a9fdb'
+                <!-- 'aff6535b-39cd-411b-82da-bcbf33a0cf05', -->
+                <!-- '37e28095-c80d-4627-8c53-0e549ce1b7dd', -->
+                <!-- '342fd606-5150-4efb-95f8-f7e16c220f71' -->
                 ) THEN 1
               ELSE 0
             END,
-            0,
+            CASE
+              WHEN r.ResourceID IN (
+                'aff6535b-39cd-411b-82da-bcbf33a0cf05',
+                '37e28095-c80d-4627-8c53-0e549ce1b7dd',
+                '342fd606-5150-4efb-95f8-f7e16c220f71'
+              ) THEN 1
+              ELSE 0
+            END,
             CASE
               WHEN r.ResourceID IN (
                 '849237c9-cdb0-402f-ae30-e730098b8651'
@@ -741,12 +748,12 @@
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
               <td>Site Name</td>
-              <td>In Hours (h)</td>
-              <td>Out of Hours (h)</td>
-              <td>Core Hours (h)</td>
+              <td>Planned Core (h)</td>
+              <td>Additional (h)</td>
+              <td>Core Available (h)</td>
+              <td>Outreach (h)</td>
               <td>Occupancy (%)</td>
-              <td>Outreach</td>
-              <td>Appointments</td>
+              <td>Number of Appointment</td>
             </thead>
             <tbody>
               <xsl:apply-templates select="site_totals" />
@@ -758,9 +765,9 @@
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
               <td>Month</td>
-              <td>In Hours (h)</td>
-              <td>Out of Hours (h)</td>
-              <td>Core Hours (h)</td>
+              <td>Planned Core (h)</td>
+              <td>Additional (h)</td>
+              <td>Core Available (h)</td>
               <td>Occupancy (%)</td>
             </thead>
             <tbody>
@@ -773,9 +780,9 @@
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
               <td>Day of Week</td>
-              <td>In Hours (h)</td>
-              <td>Out of Hours (h)</td>
-              <td>Core Hours (h)</td>
+              <td>Planned Core (h)</td>
+              <td>Additional (h)</td>
+              <td>Core Available (h)</td>
               <td>Occupancy (%)</td>
             </thead>
             <tbody>
@@ -788,13 +795,13 @@
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
               <td>Room Name</td>
-              <td>In Hours (h)</td>
-              <td>Out of Hours (h)</td>
-              <td>Core Hours (h)</td>
+              <td>Planned Core (h)</td>
+              <td>Additional (h)</td>
+              <td>Core Available (h)</td>
               <td>Occupancy (%)</td>
-              <td>In Hours Effective (h)</td>
-              <td>Out of Hours Effective (h)</td>
-              <td>Core Hours Effective(h)</td>
+              <td>Planned Core Effective (h)</td>
+              <td>Additional Effective (h)</td>
+              <td>Core Available Effective(h)</td>
               <td>Occupancy Effective(%)</td>
             </thead>
             <tbody>
@@ -807,13 +814,13 @@
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
               <td>Date</td>
-              <td>In Hours (h)</td>
-              <td>Out of Hours (h)</td>
-              <td>Core Hours (h)</td>
+              <td>Planned Core (h)</td>
+              <td>Additional (h)</td>
+              <td>Core Available (h)</td>
               <td>Occupancy (%)</td>
-              <td>In Hours Effective (h)</td>
-              <td>Out of Hours Effective (h)</td>
-              <td>Core Hours Effective(h)</td>
+              <td>Planned Core Effective (h)</td>
+              <td>Additional Effective (h)</td>
+              <td>Core Available Effective(h)</td>
               <td>Occupancy Effective(%)</td>
             </thead>
             <tbody>
