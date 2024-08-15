@@ -783,6 +783,18 @@
             </tbody>
           </table>
 
+          <h2>Top 5 Busiest Days</h2>
+
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <td>Date</td>
+              <td>Appointments</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="busiest_days" />
+            </tbody>
+          </table>
+
           <h2>Month Totals</h2>
 
           <table class="grid" cellpadding="3" cellspacing="0">
@@ -848,18 +860,6 @@
             </thead>
             <tbody>
               <xsl:apply-templates select="day_records" />
-            </tbody>
-          </table>
-
-          <h2>Top 5 Busiest Days</h2>
-
-          <table class="grid" cellpadding="3" cellspacing="0">
-            <thead>
-              <td>Date</td>
-              <td>Appointments</td>
-            </thead>
-            <tbody>
-              <xsl:apply-templates select="busiest_days" />
             </tbody>
           </table>
 
