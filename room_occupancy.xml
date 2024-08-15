@@ -735,6 +735,29 @@
       </crf:statement>
     </crf:query>
 
+    <crf:query name="busiest_days">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT TOP 5
+          re.TStartDate AS appointment_date,
+          COUNT(*) AS appointments
+        FROM view_ResourceEvents re
+        JOIN #owners o
+          ON o.id = re.ROwnerID
+        WHERE re.REStatusID NOT IN (
+            5871, -- Cancelled
+            5869 -- Unused
+          )
+          AND re.TStartDate &lt; @EndDate
+          AND re.TEndDate &gt; @StartDate
+        GROUP BY re.TStartDate
+        ORDER BY COUNT(*) DESC
+        ;
+
+      </crf:statement>
+    </crf:query>
+
   </crf:queryBatch>
 
   <crf:body id="1" title="Print format" format="text/xml">
@@ -825,6 +848,18 @@
             </thead>
             <tbody>
               <xsl:apply-templates select="day_records" />
+            </tbody>
+          </table>
+
+          <h2>Top 5 Busiest Days</h2>
+
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <td>Date</td>
+              <td>Appointments</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="busiest_days" />
             </tbody>
           </table>
 
@@ -951,6 +986,13 @@
               <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
             </xsl:if>
           </td>
+        </tr>
+      </xsl:template>
+
+      <xsl:template match="busiest_days">
+        <tr>
+          <td><xsl:value-of select="appointment_date" /></td>
+          <td><xsl:value-of select="format-number(appointments, '0')" /></td>
         </tr>
       </xsl:template>
 
