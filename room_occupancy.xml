@@ -740,7 +740,7 @@
         SET NOCOUNT ON;
 
         SELECT TOP 5
-          re.TStartDate AS appointment_date,
+          FORMAT(re.TStartDate, 'dd MMMM yyyy') AS appointment_date,
           COUNT(*) AS appointments
         FROM view_ResourceEvents re
         JOIN #owners o
