@@ -273,31 +273,6 @@
       <crf:statement>
         SET NOCOUNT ON;
 
-        CREATE TABLE #appointment_summary (
-          id INT IDENTITY(1,1) NOT NULL,
-          site_name NVARCHAR(100) NOT NULL,
-          appointment_count INT NOT NULL
-        );
-
-        CREATE NONCLUSTERED INDEX #idx_appointment_summary_id ON #appointment_summary(id);
-        CREATE NONCLUSTERED INDEX #idx_appointment_summary__site_name ON #appointment_summary(site_name);
-
-        INSERT INTO #appointment_summary (site_name, appointment_count)
-        SELECT
-          o.name,
-          COUNT(*)
-        FROM view_ResourceEvents re
-        JOIN #owners o
-          ON o.id = re.ROwnerID
-        WHERE re.REStatusID NOT IN (
-            5871, -- Cancelled
-            5869 -- Unused
-          )
-          AND re.TStartDate &lt; @EndDate
-          AND re.TEndDate &gt; @StartDate
-        GROUP BY o.name
-        ;
-
         CREATE TABLE #appointment_count (
           id INT IDENTITY(1,1) NOT NULL,
           site_name NVARCHAR(100) NOT NULL,
