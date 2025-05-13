@@ -273,6 +273,31 @@
       <crf:statement>
         SET NOCOUNT ON;
 
+        CREATE TABLE #appointment_summary (
+          id INT IDENTITY(1,1) NOT NULL,
+          site_name NVARCHAR(100) NOT NULL,
+          appointment_count INT NOT NULL
+        );
+
+        CREATE NONCLUSTERED INDEX #idx_appointment_summary_id ON #appointment_summary(id);
+        CREATE NONCLUSTERED INDEX #idx_appointment_summary__site_name ON #appointment_summary(site_name);
+
+        INSERT INTO #appointment_summary (site_name, appointment_count)
+        SELECT
+          o.name,
+          COUNT(*)
+        FROM view_ResourceEvents re
+        JOIN #owners o
+          ON o.id = re.ROwnerID
+        WHERE re.REStatusID NOT IN (
+            5871, -- Cancelled
+            5869 -- Unused
+          )
+          AND re.TStartDate &lt; @EndDate
+          AND re.TEndDate &gt; @StartDate
+        GROUP BY o.name
+        ;
+
         CREATE TABLE #appointment_count (
           id INT IDENTITY(1,1) NOT NULL,
           site_name NVARCHAR(100) NOT NULL,
@@ -529,6 +554,7 @@
           month_number INT NOT NULL,
           day_name NVARCHAR(50) NOT NULL,
           day_number INT NOT NULL,
+          quarter_name NVARCHAR(50) NOT NULL,
           ooh_minutes INT NOT NULL,
           in_hours_minutes INT NOT NULL,
           core_minutes INT NOT NULL,
@@ -547,6 +573,7 @@
           month_number,
           day_name,
           day_number,
+          quarter_name,
           ooh_minutes,
           in_hours_minutes,
           core_minutes,
@@ -564,6 +591,12 @@
           FORMAT(rd.today, 'yyyyMM'),
           rd.day_name,
           rd.day_number,
+          CASE
+              WHEN MONTH(rd.today) BETWEEN 1  AND 3  THEN convert(char(4), YEAR(rd.today) - 1) + ' Q4'
+              WHEN MONTH(rd.today) BETWEEN 4  AND 6  THEN convert(char(4), YEAR(rd.today) - 0) + ' Q1'
+              WHEN MONTH(rd.today) BETWEEN 7  AND 9  THEN convert(char(4), YEAR(rd.today) - 0) + ' Q2'
+              WHEN MONTH(rd.today) BETWEEN 10 AND 12 THEN convert(char(4), YEAR(rd.today) - 0) + ' Q3'
+          END,
           COALESCE(rdm.ooh_minutes, 0),
           COALESCE(rdm.in_hours_minutes, 0),
           COALESCE(rd.core_minutes, 0),
@@ -646,6 +679,29 @@
         FROM #resource_day_effective
         GROUP BY site_name, month_name, month_number
         ORDER BY site_name, month_number
+        ;
+
+      </crf:statement>
+    </crf:query>
+
+    <crf:query name="quarter_totals">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT
+          site_name,
+          quarter_name,
+          SUM(in_hours_minutes_effective) / 60.0 AS in_hours_minutes_effective,
+          SUM(ooh_minutes_effective) / 60.0 AS ooh_minutes_effective,
+          SUM(core_minutes_effective) / 60.0 AS core_minutes_effective,
+          CASE WHEN (SUM(core_minutes_effective) > 0) THEN
+            (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
+          ELSE
+            NULL
+          END occupancy_percentage_effective
+        FROM #resource_day_effective
+        GROUP BY site_name, quarter_name
+        ORDER BY site_name, quarter_name
         ;
 
       </crf:statement>
@@ -795,6 +851,21 @@
             </tbody>
           </table>
 
+          <h2>Quarter Totals</h2>
+
+          <table class="grid" cellpadding="3" cellspacing="0">
+            <thead>
+              <td>Quarter</td>
+              <td>Planned Core (h)</td>
+              <td>Additional (h)</td>
+              <td>Core Available (h)</td>
+              <td>Occupancy (%)</td>
+            </thead>
+            <tbody>
+              <xsl:apply-templates select="quarter_totals" />
+            </tbody>
+          </table>
+
           <h2>Month Totals</h2>
 
           <table class="grid" cellpadding="3" cellspacing="0">
@@ -879,6 +950,27 @@
           </td>
           <td><xsl:value-of select="format-number(outreach_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(appointment_count, '0')" /></td>
+        </tr>
+      </xsl:template>
+
+      <xsl:template match="quarter_totals">
+        <xsl:if test="preceding-sibling::month_totals[1]/site_name!=site_name or position()=1">
+          <tr>
+            <td colspan="5" class="section_head">
+              <xsl:value-of select="site_name" />
+            </td>
+          </tr>
+        </xsl:if>
+        <tr>
+          <td><xsl:value-of select="quarter_name" /></td>
+          <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
+          <td class="section_head">
+            <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
+              <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
+            </xsl:if>
+          </td>
         </tr>
       </xsl:template>
 
