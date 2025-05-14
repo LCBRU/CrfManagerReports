@@ -520,6 +520,77 @@
       <crf:statement>
         SET NOCOUNT ON;
 
+        CREATE TABLE #appointment_summary (
+          id INT IDENTITY(1,1) NOT NULL,
+          date DATE NOT NULL,
+          resource_id UNIQUEIDENTIFIER,
+          resource_name NVARCHAR(100) NOT NULL,
+          site_name NVARCHAR(100) NOT NULL,
+          month_name NVARCHAR(50) NOT NULL,
+          month_number INT NOT NULL,
+          day_name NVARCHAR(50) NOT NULL,
+          day_number INT NOT NULL,
+          quarter_name NVARCHAR(50) NOT NULL,
+          outreach BIT NOT NULL,
+          appointment_count INT NOT NULL
+        );
+
+        CREATE NONCLUSTERED INDEX #idx_appointment_summary_id ON #appointment_summary(id);
+
+        INSERT INTO #appointment_summary (
+          [date],
+          resource_id,
+          resource_name,
+          site_name,
+          month_name,
+          month_number,
+          day_name,
+          day_number,
+          quarter_name,
+          outreach,
+          appointment_count
+        )
+        SELECT
+          rd.today,
+          rd.resource_id,
+          r.name,
+          o.name,
+          FORMAT(rd.today, 'yyyy MMMM'),
+          FORMAT(rd.today, 'yyyyMM'),
+          rd.day_name,
+          rd.day_number,
+          CASE
+              WHEN MONTH(rd.today) BETWEEN 1  AND 3  THEN convert(char(4), YEAR(rd.today) - 1) + ' Q4'
+              WHEN MONTH(rd.today) BETWEEN 4  AND 6  THEN convert(char(4), YEAR(rd.today) - 0) + ' Q1'
+              WHEN MONTH(rd.today) BETWEEN 7  AND 9  THEN convert(char(4), YEAR(rd.today) - 0) + ' Q2'
+              WHEN MONTH(rd.today) BETWEEN 10 AND 12 THEN convert(char(4), YEAR(rd.today) - 0) + ' Q3'
+          END,
+          r.outreach,
+          COUNT(*)
+        FROM view_ResourceEvents re
+        JOIN #resource_dates rd
+          ON rd.today &lt;= re.TStartDate
+          AND rd.tomorrow &gt; re.TStartDate
+          AND rd.resource_id = re.ResourceID
+        JOIN #resources r
+          ON r.id = rd.resource_id
+          AND r.id = re.ResourceID
+        JOIN #owners o
+          ON o.id = re.ROwnerID
+        WHERE re.REStatusID NOT IN (
+            5871, -- Cancelled
+            5869 -- Unused
+          )
+        GROUP BY
+          rd.resource_id,
+          r.name,
+          o.name,
+          rd.today,
+          rd.day_name,
+          rd.day_number,
+          r.outreach
+        ;
+
         CREATE TABLE #resource_day_effective (
           date DATE NOT NULL,
           resource_id NVARCHAR(50) NOT NULL,
@@ -613,6 +684,18 @@
       </crf:statement>
     </crf:query>
 
+    <crf:query name="appointment_details">
+      <crf:statement>
+        SET NOCOUNT ON;
+
+        SELECT *
+        FROM #appointment_summary a
+        ORDER BY a.[date], resource_id
+        ;
+
+      </crf:statement>
+    </crf:query>
+
     <crf:query name="site_totals">
       <crf:statement>
         SET NOCOUNT ON;
@@ -628,7 +711,8 @@
             NULL
           END occupancy_percentage_effective,
           SUM(outreach_minutes_effective) / 60.0 AS outreach_minutes_effective,
-          ISNULL((SELECT a.appointment_count FROM #appointment_count a WHERE a.site_name = r.site_name), 0) appointment_count
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.outreach = 1), 0) outreach_appointments,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name), 0) total_appointments
         FROM #resource_day_effective r
         GROUP BY site_name
         ;
@@ -650,8 +734,10 @@
             (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
           ELSE
             NULL
-          END occupancy_percentage_effective
-        FROM #resource_day_effective
+          END occupancy_percentage_effective,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.month_number = r.month_number AND a.outreach = 1), 0) outreach_appointments,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.month_number = r.month_number), 0) total_appointments
+        FROM #resource_day_effective r
         GROUP BY site_name, month_name, month_number
         ORDER BY site_name, month_number
         ;
@@ -673,8 +759,10 @@
             (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
           ELSE
             NULL
-          END occupancy_percentage_effective
-        FROM #resource_day_effective
+          END occupancy_percentage_effective,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.quarter_name = r.quarter_name AND a.outreach = 1), 0) outreach_appointments,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.quarter_name = r.quarter_name), 0) total_appointments
+        FROM #resource_day_effective r
         GROUP BY site_name, quarter_name
         ORDER BY site_name, quarter_name
         ;
@@ -704,8 +792,10 @@
             (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
           ELSE
             NULL
-          END occupancy_percentage_effective
-        FROM #resource_day_effective
+          END occupancy_percentage_effective,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.resource_name = r.resource_name AND a.outreach = 1), 0) outreach_appointments,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.resource_name = r.resource_name), 0) total_appointments
+        FROM #resource_day_effective r
         GROUP BY site_name, resource_name
         ORDER BY site_name, resource_name
         ;
@@ -727,8 +817,10 @@
             (SUM(in_hours_minutes_effective) * 1.0) / SUM(core_minutes_effective)
           ELSE
             NULL
-          END occupancy_percentage_effective
-        FROM #resource_day_effective
+          END occupancy_percentage_effective,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.day_number = r.day_number AND a.outreach = 1), 0) outreach_appointments,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.day_number = r.day_number), 0) total_appointments
+        FROM #resource_day_effective r
         GROUP BY site_name, day_name, day_number
         ORDER BY site_name, day_number
         ;
@@ -759,8 +851,10 @@
             (in_hours_minutes_effective * 1.0) / core_minutes_effective
           ELSE
             NULL
-          END occupancy_percentage_effective
-        FROM #resource_day_effective
+          END occupancy_percentage_effective,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.resource_name = r.resource_name AND a.date = r.date AND a.outreach = 1), 0) outreach_appointments,
+          ISNULL((SELECT SUM(a.appointment_count) FROM #appointment_summary a WHERE a.site_name = r.site_name AND a.resource_name = r.resource_name AND a.date = r.date), 0) total_appointments
+        FROM #resource_day_effective r
         ;
 
       </crf:statement>
@@ -771,18 +865,11 @@
         SET NOCOUNT ON;
 
         SELECT TOP 5
-          FORMAT(re.TStartDate, 'dd MMMM yyyy') AS appointment_date,
-          COUNT(*) AS appointments
-        FROM view_ResourceEvents re
-        JOIN #owners o
-          ON o.id = re.ROwnerID
-        WHERE re.REStatusID NOT IN (
-            5871, -- Cancelled
-            5869 -- Unused
-          )
-          AND re.TStartDate &lt; @EndDate
-          AND re.TEndDate &gt; @StartDate
-        GROUP BY re.TStartDate
+          FORMAT(a.[date], 'dd MMMM yyyy') AS appointment_date,
+          SUM(CASE WHEN a.outreach = 1 THEN a.appointment_count ELSE 0 END) outreach_appointments,
+          SUM(a.appointment_count) total_appointments
+        FROM #appointment_summary a
+        GROUP BY a.[date]
         ORDER BY COUNT(*) DESC
         ;
 
@@ -807,7 +894,8 @@
               <td>Core Available (h)</td>
               <td>Occupancy (%)</td>
               <td>Outreach (h)</td>
-              <td>Number of Appointment</td>
+              <td>Outreach Appointments</td>
+              <td>Total Appointments</td>
             </thead>
             <tbody>
               <xsl:apply-templates select="site_totals" />
@@ -819,7 +907,8 @@
           <table class="grid" cellpadding="3" cellspacing="0">
             <thead>
               <td>Date</td>
-              <td>Appointments</td>
+              <td>Outreach Appointments</td>
+              <td>Total Appointments</td>
             </thead>
             <tbody>
               <xsl:apply-templates select="busiest_days" />
@@ -834,6 +923,8 @@
               <td>Planned Core (h)</td>
               <td>Additional (h)</td>
               <td>Core Available (h)</td>
+              <td>Outreach Appointments</td>
+              <td>Total Appointments</td>
               <td>Occupancy (%)</td>
             </thead>
             <tbody>
@@ -849,6 +940,8 @@
               <td>Planned Core (h)</td>
               <td>Additional (h)</td>
               <td>Core Available (h)</td>
+              <td>Outreach Appointments</td>
+              <td>Total Appointments</td>
               <td>Occupancy (%)</td>
             </thead>
             <tbody>
@@ -864,6 +957,8 @@
               <td>Planned Core (h)</td>
               <td>Additional (h)</td>
               <td>Core Available (h)</td>
+              <td>Outreach Appointments</td>
+              <td>Total Appointments</td>
               <td>Occupancy (%)</td>
             </thead>
             <tbody>
@@ -879,6 +974,8 @@
               <td>Planned Core (h)</td>
               <td>Additional (h)</td>
               <td>Core Available (h)</td>
+              <td>Outreach Appointments</td>
+              <td>Total Appointments</td>
               <td>Occupancy (%)</td>
               <td>Planned Core Effective (h)</td>
               <td>Additional Effective (h)</td>
@@ -898,6 +995,8 @@
               <td>Planned Core (h)</td>
               <td>Additional (h)</td>
               <td>Core Available (h)</td>
+              <td>Outreach Appointments</td>
+              <td>Total Appointments</td>
               <td>Occupancy (%)</td>
               <td>Planned Core Effective (h)</td>
               <td>Additional Effective (h)</td>
@@ -924,14 +1023,15 @@
             </xsl:if>
           </td>
           <td><xsl:value-of select="format-number(outreach_minutes_effective, '0.00')" /></td>
-          <td><xsl:value-of select="format-number(appointment_count, '0')" /></td>
+          <td><xsl:value-of select="format-number(outreach_appointments, '0')" /></td>
+          <td><xsl:value-of select="format-number(total_appointments, '0')" /></td>
         </tr>
       </xsl:template>
 
       <xsl:template match="quarter_totals">
         <xsl:if test="preceding-sibling::month_totals[1]/site_name!=site_name or position()=1">
           <tr>
-            <td colspan="5" class="section_head">
+            <td colspan="7" class="section_head">
               <xsl:value-of select="site_name" />
             </td>
           </tr>
@@ -941,6 +1041,8 @@
           <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(outreach_appointments, '0')" /></td>
+          <td><xsl:value-of select="format-number(total_appointments, '0')" /></td>
           <td class="section_head">
             <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
               <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
@@ -952,7 +1054,7 @@
       <xsl:template match="month_totals">
         <xsl:if test="preceding-sibling::month_totals[1]/site_name!=site_name or position()=1">
           <tr>
-            <td colspan="5" class="section_head">
+            <td colspan="7" class="section_head">
               <xsl:value-of select="site_name" />
             </td>
           </tr>
@@ -962,6 +1064,8 @@
           <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(outreach_appointments, '0')" /></td>
+          <td><xsl:value-of select="format-number(total_appointments, '0')" /></td>
           <td class="section_head">
             <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
               <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
@@ -973,7 +1077,7 @@
       <xsl:template match="resource_totals">
         <xsl:if test="preceding-sibling::resource_totals[1]/site_name!=site_name or position()=1">
           <tr>
-            <td colspan="10" class="section_head">
+            <td colspan="12" class="section_head">
               <xsl:value-of select="site_name" />
             </td>
           </tr>
@@ -983,6 +1087,8 @@
           <td><xsl:value-of select="format-number(in_hours_minutes, '0.00')" /></td>
           <td><xsl:value-of select="format-number(ooh_minutes, '0.00')" /></td>
           <td><xsl:value-of select="format-number(core_minutes, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(outreach_appointments, '0')" /></td>
+          <td><xsl:value-of select="format-number(total_appointments, '0')" /></td>
           <td class="section_head">
             <xsl:if test="(occupancy_percentage=occupancy_percentage)">
               <xsl:value-of select="format-number(occupancy_percentage, '0.00%')" />
@@ -1002,7 +1108,7 @@
       <xsl:template match="day_totals">
         <xsl:if test="preceding-sibling::day_totals[1]/site_name!=site_name or position()=1">
           <tr>
-            <td colspan="5" class="section_head">
+            <td colspan="7" class="section_head">
               <xsl:value-of select="site_name" />
             </td>
           </tr>
@@ -1012,6 +1118,8 @@
           <td><xsl:value-of select="format-number(in_hours_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(ooh_minutes_effective, '0.00')" /></td>
           <td><xsl:value-of select="format-number(core_minutes_effective, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(outreach_appointments, '0')" /></td>
+          <td><xsl:value-of select="format-number(total_appointments, '0')" /></td>
           <td class="section_head">
             <xsl:if test="(occupancy_percentage_effective=occupancy_percentage_effective)">
               <xsl:value-of select="format-number(occupancy_percentage_effective, '0.00%')" />
@@ -1023,7 +1131,7 @@
       <xsl:template match="day_records">
         <xsl:if test="preceding-sibling::day_records[1]/site_name!=site_name or position()=1">
           <tr>
-            <td colspan="10" class="section_head">
+            <td colspan="12" class="section_head">
               <xsl:value-of select="site_name" />
             </td>
           </tr>
@@ -1040,6 +1148,8 @@
           <td><xsl:value-of select="format-number(in_hours_minutes, '0.00')" /></td>
           <td><xsl:value-of select="format-number(ooh_minutes, '0.00')" /></td>
           <td><xsl:value-of select="format-number(core_minutes, '0.00')" /></td>
+          <td><xsl:value-of select="format-number(outreach_appointments, '0')" /></td>
+          <td><xsl:value-of select="format-number(total_appointments, '0')" /></td>
           <td class="section_head">
             <xsl:if test="(occupancy_percentage=occupancy_percentage)">
               <xsl:value-of select="format-number(occupancy_percentage, '0.00%')" />
@@ -1059,7 +1169,8 @@
       <xsl:template match="busiest_days">
         <tr>
           <td><xsl:value-of select="appointment_date" /></td>
-          <td><xsl:value-of select="format-number(appointments, '0')" /></td>
+          <td><xsl:value-of select="format-number(outreach_appointments, '0')" /></td>
+          <td><xsl:value-of select="format-number(total_appointments, '0')" /></td>
         </tr>
       </xsl:template>
 
